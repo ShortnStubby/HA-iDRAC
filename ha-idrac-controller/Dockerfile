@@ -1,12 +1,8 @@
 # HA-iDRAC/ha-idrac-controller/Dockerfile
 
-# Use the $(arch) variable provided by the Home Assistant build system.
-# This ensures the correct architecture-specific base image is pulled.
-# Using a specific patch version and Debian release for stability.
-# Example: for amd64, $(arch) becomes "amd64", so it pulls "ghcr.io/home-assistant/amd64-base-python:..."
-FROM ghcr.io/home-assistant/$(arch)-base-python:3.12.3-slim-bookworm
-
-# We are no longer using ARG BUILD_FROM as the FROM line is now arch-aware.
+# Temporarily hardcode 'amd64' for testing.
+# Replace $(arch) with amd64 if you are building on an amd64 system for testing.
+FROM ghcr.io/home-assistant/amd64-base-python:3.12.3-slim-bookworm
 
 # Install system dependencies
 RUN apt-get update && \
