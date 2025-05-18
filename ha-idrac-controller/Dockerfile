@@ -1,21 +1,18 @@
-# HA-iDRAC/ha-idrac-controller/Dockerfile
-# We've discovered ghcr.io/home-assistant/amd64-base-python:latest is currently Alpine-based in this environment
-FROM ghcr.io/home-assistant/amd64-base-python:latest
+FROM ghcr.io/home-assistant/amd64-base-python:3.12.3-slim-bookworm 
+# Or even just FROM ghcr.io/home-assistant/amd64-base:stable (and install python manually)
 
-# Alpine's default shell is ash. Bash was found to be present in the diagnostic,
-# but we can ensure commands run with it if needed, or just let apk run with ash.
-# The SHELL directive is fine to keep if bash is indeed present and preferred for complex RUN lines.
-SHELL ["/bin/bash", "-o", "pipefail", "-c"] 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Use apk to install packages on Alpine
-RUN echo "Attempting apk update and add for Alpine..." && \
-    apk update && \
-    apk add --no-cache \
-        ipmitool \
-        bash \  
-    && echo "Packages installed successfully with apk."
+# Use apt-get again
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    python3 python3-pip python3-venv ipmitool bash \
+ && rm -rf /var/lib/apt/lists/*
 
-# --- Rest of your Dockerfile ---
+# If using amd64-base:stable, you'd need to install python3, python3-pip, python3-venv first
+# RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip python3-venv ...
+
+# ... rest of your Dockerfile ...
 WORKDIR /app
 
 # Copy requirements first to leverage Docker cache
