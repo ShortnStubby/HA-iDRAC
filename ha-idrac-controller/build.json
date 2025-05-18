@@ -1,8 +1,8 @@
 {
     "build_from": {
-      "aarch64": "ghcr.io/home-assistant/aarch64-base-python:3.12-slim",
-      "amd64": "ghcr.io/home-assistant/amd64-base-python:3.12-slim",
-      "armv7": "ghcr.io/home-assistant/armv7-base-python:3.12-slim"
+      "aarch64": "ghcr.io/home-assistant/aarch64-base-python:3.12.3-slim",
+      "amd64": "ghcr.io/home-assistant/amd64-base-python:3.12.3-slim",
+      "armv7": "ghcr.io/home-assistant/armv7-base-python:3.12.3-slim" 
     },
     "args": {}
   }
