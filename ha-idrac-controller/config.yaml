@@ -1,91 +1,68 @@
 # HA-iDRAC/ha-idrac-controller/config.yaml
 
-name: "HA iDRAC Controller"  # The user-friendly name shown in the store
-version: "0.1.0"             # Start with an initial version. Increment as you release updates.
-slug: "ha_idrac_controller"   # Unique identifier. Keep it simple, lowercase, with underscores.
+name: "HA iDRAC Controller"
+version: "0.1.1" # Incremented version
+slug: "ha_idrac_controller"
 description: "Control Dell iDRAC fan speeds and monitor server health in Home Assistant."
-# Your GitHub username or org name. Used if you publish to a community add-on repository.
-# maintainer: "Aesgarth <your_email_or_github_profile_url>" # Optional
-
-# What CPU architectures does your add-on support?
-# Common ones: aarch64 (Raspberry Pi 4+), amd64 (PCs, Intel NUCs, VMs)
 arch:
   - "aarch64"
   - "amd64"
-#  - "armv7" # For older Raspberry Pi models
+init: false
+boot: "auto"
 
-# How your add-on starts
-init: false      # Set to true if your add-on MUST start before Home Assistant Core (rarely needed)
-boot: "auto"     # "auto" = start when Home Assistant starts. "manual" = user must start it.
+ingress: true
+ingress_port: 8099
+ingress_entry: "/"
+panel_icon: "mdi:server-network"
+panel_title: "iDRAC Control"
+panel_admin: true
 
-# --- Web UI & Ingress for your Admin Panel ---
-# Ingress allows your add-on's web UI to be embedded directly into the Home Assistant interface.
-ingress: true                 # Enable Ingress
-ingress_port: 8099            # The port your Python web server (Flask/FastAPI) INSIDE the Docker container will listen on.
-                              # This port is NOT exposed on the host.
-ingress_entry: "/"            # The entry point path for your web UI (optional, defaults to / if not set)
-panel_icon: "mdi:server-network" # Icon shown in the Home Assistant sidebar for your add-on. Find icons at https://materialdesignicons.com/
-panel_title: "iDRAC Control"  # Title shown in the Home Assistant sidebar.
-panel_admin: true             # True = only Home Assistant admins can see the panel. False = all users.
-
-# --- Configuration Options ---
-# These are settings users can change in the Home Assistant UI for your add-on.
-# They will be available to your `run.sh` script and Python app.
 options:
-  idrac_ip: ""                 # IP address or hostname of the iDRAC
-  idrac_username: "root"       # Default iDRAC username
-  idrac_password: ""           # iDRAC password (will be a secret)
-  check_interval_seconds: 60   # How often to check temperatures
-  log_level: "info"            # For your Python application's logging
+  # iDRAC Connection
+  idrac_ip: ""
+  idrac_username: "root"
+  idrac_password: ""           # Secret
 
-# Defines the UI schema for the options above.
+  # Fan Control Logic
+  temperature_unit: "C"        # C or F
+  base_fan_speed_percent: 20   # Default fan speed if below low_temp_threshold
+  low_temp_threshold: 45       # Temp (in selected unit) to maintain base_fan_speed
+  high_temp_fan_speed_percent: 50 # Fan speed for temps between low_temp and critical_temp
+  critical_temp_threshold: 65  # Temp (in selected unit) at which to hand control to iDRAC
+
+  # Polling and Logging
+  check_interval_seconds: 30
+  log_level: "info"
+
+  # MQTT Configuration
+  mqtt_host: "core-mosquitto"
+  mqtt_port: 1883
+  mqtt_username: ""
+  mqtt_password: ""            # Secret
+
 schema:
-  idrac_ip: "str"              # A string input
+  # iDRAC Connection
+  idrac_ip: "str"
   idrac_username: "str"
-  idrac_password: "password"   # Renders as a password field in the UI (value is still a string)
-  check_interval_seconds: "int(5,)" # An integer, with a minimum value of 5
-  log_level: "list(trace|debug|info|notice|warning|error|fatal)?" # A dropdown list, optional
+  idrac_password: "password"
 
-# --- Network Configuration ---
-host_network: false # Default and recommended. Add-on gets its own IP within Docker.
-                    # Set to true only if absolutely necessary (e.g., for UPnP discovery).
+  # Fan Control Logic
+  temperature_unit: "list(C|F)"
+  base_fan_speed_percent: "int(0,100)"
+  low_temp_threshold: "int(0,100)"
+  high_temp_fan_speed_percent: "int(0,100)"
+  critical_temp_threshold: "int(0,100)"
 
-# If you need to expose ports directly on the host (NOT needed for Ingress UI):
-# ports:
-#   "1883/tcp": 1883 # Example: If your add-on itself was an MQTT broker on port 1883
+  # Polling and Logging
+  check_interval_seconds: "int(5,)"
+  log_level: "list(trace|debug|info|notice|warning|error|fatal)" # Added trace & notice
 
-# If you need to expose UDP ports:
-# ports_description:
-#   "1900/udp": "SSDP discovery"
+  # MQTT Configuration
+  mqtt_host: "str"
+  mqtt_port: "port"
+  mqtt_username: "str?" # Optional
+  mqtt_password: "password?" # Optional
 
-# --- Access to Host System (for local IPMI via /dev/ipmi0) ---
-# If you plan to support local IPMI access (where iDRAC_IP is "local"),
-# the add-on needs access to the host's IPMI device.
-# This is powerful and should be used carefully. Start with network mode if unsure.
-devices: []
-# Example:
-# devices:
-#  - "/dev/ipmi0:/dev/ipmi0:rwm" # Path on host : path in container : permissions
-#  - "/dev/ipmi/0:/dev/ipmi/0:rwm"
-# Alternatively, for broader permissions (less secure, try to avoid):
-# privileged:
-#   - SYS_RAWIO # May be needed for some low-level hardware access
-
-# --- Persistent Data Storage ---
-# This maps a directory inside your add-on to a persistent location on the host,
-# managed by Home Assistant. Your add-on can read/write here.
 map:
-  - "data:rw"   # /data inside the add-on will be persistent. Use this to store your admin panel's settings (fan curve, etc.)
-#  - "config:ro" # /config gives read-only access to Home Assistant's main configuration directory (if needed)
-#  - "ssl:ro"    # /ssl for SSL certificates (if needed)
-#  - "share:rw"  # /share for general file sharing
-
-# --- Logging & API Access ---
-# What level of access to Home Assistant API your add-on needs.
-# "default" is fine for most add-ons that don't heavily interact with HA Core.
+  - "data:rw"
 hassio_role: "default"
-# If your add-on needs to make calls to the Home Assistant API (e.g., to get states):
-# homeassistant_api: true
-
-# --- Optional: Timeout for starting/stopping ---
-# timeout: 30 # Seconds to wait before supervisor considers startup/shutdown failed
