@@ -109,4 +109,82 @@ class MqttClient:
     def on_disconnect(self, client, userdata, rc): # Removed properties for MQTTv311
         print(f"[INFO] MQTT: Disconnected from broker with result code {rc}.", flush=True)
         self.is_connected = False
-        # Note: p
+        # Note: paho-mqtt's loop_start() handles reconnections automatically.
+
+    def connect(self):
+        if not self.is_connected:
+            print(f"[INFO] MQTT: Attempting to connect to broker {self.broker_address}:{self.port}...", flush=True)
+            try:
+                # Set Last Will and Testament (LWT)
+                self.client.will_set("ha_idrac_controller/status", payload="offline", qos=1, retain=True)
+                self.client.connect(self.broker_address, self.port, 60)
+                self.client.loop_start() 
+            except ConnectionRefusedError:
+                print(f"[ERROR] MQTT: Connection refused by broker {self.broker_address}:{self.port}. Check credentials and broker config.", flush=True)
+                self.is_connected = False
+            except OSError as e: # Catches [Errno 113] Host is unreachable, etc.
+                print(f"[ERROR] MQTT: OS error while connecting to broker {self.broker_address}:{self.port} - {e}", flush=True)
+                self.is_connected = False
+            except Exception as e:
+                print(f"[ERROR] MQTT: Could not connect to broker: {e}", flush=True)
+                self.is_connected = False
+
+    def disconnect(self):
+        if self.is_connected:
+            self.publish("ha_idrac_controller/status", "offline", retain=True)
+            self.client.loop_stop()
+            self.client.disconnect()
+            print("[INFO] MQTT: Gracefully disconnected.", flush=True)
+
+    def publish(self, topic, payload, retain=False, qos=0):
+        if self.is_connected:
+            try:
+                # print(f"[DEBUG] MQTT: Publishing to {topic}: {payload}", flush=True) # Can be very verbose
+                msg_info = self.client.publish(topic, payload, qos=qos, retain=retain)
+                if msg_info.rc == mqtt.MQTT_ERR_SUCCESS:
+                    # print(f"[TRACE] MQTT: Message mid {msg_info.mid} enqueued for topic {topic}.", flush=True)
+                    pass
+                else:
+                    print(f"[WARNING] MQTT: Failed to enqueue message for topic {topic}. Error code: {msg_info.rc}", flush=True)
+                return msg_info.is_published() # This doesn't guarantee delivery, just enqueued
+            except Exception as e:
+                print(f"[ERROR] MQTT: Failed to publish to {topic}: {e}", flush=True)
+        else:
+            print(f"[WARNING] MQTT: Not connected. Cannot publish to {topic}.", flush=True)
+        return False
+
+    def publish_sensor_discovery(self, sensor_type_slug, sensor_name, device_class=None, unit_of_measurement=None, icon=None, value_template=None, entity_category=None):
+        """Publishes a generic sensor discovery message."""
+        if not self.device_info_dict:
+            print("[WARNING] MQTT: Device info not set. Cannot publish discovery message for {sensor_name}.", flush=True)
+            return
+
+        discovery_topic_slug = f"idrac_{sensor_type_slug}" # e.g., idrac_cpu_0_temp
+        config_topic = f"homeassistant/sensor/{discovery_topic_slug}/config"
+        
+        payload = {
+            "name": f"iDRAC {sensor_name}",
+            "state_topic": f"ha_idrac_controller/sensor/{discovery_topic_slug}/state",
+            "unique_id": f"idrac_controller_{self.device_info_dict['identifiers'][0]}_{sensor_type_slug}",
+            "device": self.device_info_dict,
+            "availability_topic": "ha_idrac_controller/status",
+            "payload_available": "online",
+            "payload_not_available": "offline"
+        }
+        if device_class: payload["device_class"] = device_class
+        if unit_of_measurement: payload["unit_of_measurement"] = unit_of_measurement
+        if icon: payload["icon"] = icon
+        if value_template: payload["value_template"] = value_template
+        if entity_category: payload["entity_category"] = entity_category # e.g. "diagnostic"
+
+        self.publish(config_topic, json.dumps(payload), retain=True)
+        print(f"[DEBUG] MQTT: Published discovery for {sensor_name} on topic {config_topic}", flush=True)
+
+    def publish_sensor_state(self, sensor_type_slug, value_dict):
+        """Publishes state for a sensor, expecting value_dict to contain the keys used in value_template."""
+        # Example: value_dict = {"temperature": 25.5} for a temperature sensor
+        # Example: value_dict = {"rpm": 3000} for a fan sensor
+        # Example: value_dict = {"speed": 50} for target fan speed sensor
+        topic_slug = f"idrac_{sensor_type_slug}"
+        state_topic = f"ha_idrac_controller/sensor/{topic_slug}/state"
+        self.publish(state_topic, json.dumps(value_dict))
