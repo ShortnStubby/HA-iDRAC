@@ -148,61 +148,82 @@ def parse_temperatures(sdr_data,
         _log("warning", "SDR data is empty, cannot parse temperatures.")
         return temps
 
-    # Compile regex patterns for efficiency if they are valid
+    _log("debug", f"Attempting to compile regex patterns: CPU='{cpu_generic_pattern_str}', Inlet='{inlet_pattern_str}', Exhaust='{exhaust_pattern_str}'")
     try:
         cpu_generic_pattern = re.compile(cpu_generic_pattern_str, re.IGNORECASE) if cpu_generic_pattern_str else None
         inlet_pattern = re.compile(inlet_pattern_str, re.IGNORECASE) if inlet_pattern_str else None
         exhaust_pattern = re.compile(exhaust_pattern_str, re.IGNORECASE) if exhaust_pattern_str else None
     except re.error as e:
         _log("error", f"Invalid regex pattern provided for temperature parsing: {e}")
-        return temps # Return empty if patterns are bad
+        return temps 
 
+    # Regex to capture sensor name and its temperature value
+    # Example line: "Inlet Temp       | 04h | ok  |  7.1 | 18 degrees C"
+    # Group 1: Sensor Name (e.g., "Inlet Temp       ")
+    # Group 3: Temperature Value (e.g., "18")
     temp_line_regex = re.compile(
-        r"^(.*?)\s*\|\s*[\da-fA-F]+h\s*\|\s*(?:ok|ns|nr|cr|\[Unknown\])\s*.*?\|\s*([-+]?\d*\.?\d+)\s*(?:degrees C|C)", 
+        r"^(.*?)\s*\|\s*[\da-fA-F]+h\s*\|\s*(?:ok|ns|nr|cr|u|\[Unknown\])\s*.*?\|\s*([-+]?\d*\.?\d+)\s*(?:degrees C|C)",
+        # Added 'u' to status for "unknown" sometimes seen
         re.IGNORECASE
     )
-
+    
+    _log("debug", "Starting to parse SDR lines for temperatures...")
     lines = sdr_data.splitlines()
     inlet_found = False
     exhaust_found = False
 
-    for line in lines:
+    for i, line in enumerate(lines):
         line_content = line.strip()
+        _log("trace", f"Processing SDR Line {i+1}: '{line_content}'") # Use TRACE for very verbose
+        
         match_temp = temp_line_regex.match(line_content)
 
         if match_temp:
-            sensor_name_from_line = match_temp.group(1).strip()
+            sensor_name_from_line = match_temp.group(1).strip() # Sensor name
+            temp_value_str = match_temp.group(2) # Temperature value as string
+            _log("trace", f"  Line matched temp_line_regex. Sensor: '{sensor_name_from_line}', ValueStr: '{temp_value_str}'")
+
             try:
-                temp_value = int(float(match_temp.group(3)))
-            except (ValueError, IndexError):
-                _log("debug", f"Could not parse temperature value from line: {line_content}")
+                temp_value = int(float(temp_value_str))
+            except (ValueError, IndexError) as e:
+                _log("warning", f"  Could not parse numeric temperature value ('{temp_value_str}') from line: {line_content}. Error: {e}")
                 continue
 
-            # Prioritize specific sensors
+            # Check for Inlet Temp
             if not inlet_found and inlet_pattern and inlet_pattern.search(sensor_name_from_line):
                 temps["inlet_temp"] = temp_value
                 inlet_found = True
-                _log("debug", f"Matched Inlet: '{sensor_name_from_line}' as {temp_value}°C")
+                _log("debug", f"  MATCHED INLET: '{sensor_name_from_line}' as {temp_value}°C")
                 continue 
             
+            # Check for Exhaust Temp
             if not exhaust_found and exhaust_pattern and exhaust_pattern.search(sensor_name_from_line):
                 temps["exhaust_temp"] = temp_value
                 exhaust_found = True
-                _log("debug", f"Matched Exhaust: '{sensor_name_from_line}' as {temp_value}°C")
+                _log("debug", f"  MATCHED EXHAUST: '{sensor_name_from_line}' as {temp_value}°C")
                 continue
 
-            # Then look for generic CPU temperatures if not already matched as inlet/exhaust
+            # Check for generic CPU temperatures
             if cpu_generic_pattern and cpu_generic_pattern.search(sensor_name_from_line):
-                # Check it's not also an inlet/exhaust if their patterns were too broad (unlikely here)
-                is_already_categorized = (inlet_found and inlet_pattern and inlet_pattern.search(sensor_name_from_line)) or \
-                                         (exhaust_found and exhaust_pattern and exhaust_pattern.search(sensor_name_from_line))
-                if not is_already_categorized:
+                # Ensure it's not an Inlet/Exhaust that was missed if their patterns were too loose
+                # (This check is mostly a safeguard, depends on pattern specificity)
+                is_inlet_by_pattern = inlet_pattern and inlet_pattern.search(sensor_name_from_line)
+                is_exhaust_by_pattern = exhaust_pattern and exhaust_pattern.search(sensor_name_from_line)
+
+                if (is_inlet_by_pattern and inlet_found) or \
+                   (is_exhaust_by_pattern and exhaust_found):
+                    # This line matched a generic CPU pattern but was already categorized as Inlet/Exhaust.
+                    # This should ideally not happen if Inlet/Exhaust patterns are specific enough.
+                    _log("trace", f"  Skipping generic CPU match for '{sensor_name_from_line}' as it was already categorized or matched a specific sensor that was found.")
+                elif not is_inlet_by_pattern and not is_exhaust_by_pattern :
                     temps["cpu_temps"].append(temp_value)
-                    _log("debug", f"Found generic CPU Temp: '{sensor_name_from_line}' as {temp_value}°C, added to list.")
-                continue
+                    _log("debug", f"  MATCHED GENERIC CPU: '{sensor_name_from_line}' as {temp_value}°C, added to list.")
+                else:
+                    _log("trace", f"  Generic CPU pattern matched '{sensor_name_from_line}', but it also matched a specific (Inlet/Exhaust) pattern that wasn't yet found. Prioritizing specific patterns if they trigger later.")
+
         else:
-            _log("debug", f"Line did not match temp_line_regex: {line_content}")
-    
+            _log("trace", f"  Line did not match temp_line_regex: {line_content}")
+            
     if not temps["cpu_temps"]: _log("warning", f"No CPU temperature sensors found using generic pattern: {cpu_generic_pattern_str}")
     if not inlet_found: _log("info", f"Inlet temperature sensor not found using pattern: {inlet_pattern_str}")
     if not exhaust_found: _log("info", f"Exhaust temperature sensor not found using pattern: {exhaust_pattern_str}")

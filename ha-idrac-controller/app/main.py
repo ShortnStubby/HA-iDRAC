@@ -144,6 +144,7 @@ def main_control_loop(mqtt_handler):
         parsed_temperatures_c = {} 
 
         if raw_sdr_data:
+            print(f"[{log_level.upper()}] RAW SDR DATA RECEIVED:\n{raw_sdr_data}\n-------------------------", flush=True)
             parsed_temperatures_c = ipmi_manager.parse_temperatures(
                 raw_sdr_data,
                 server_info["cpu_generic_temp_pattern"],
