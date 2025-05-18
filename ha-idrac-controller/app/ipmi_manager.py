@@ -144,10 +144,88 @@ def retrieve_temperatures_raw():
         _log("warning", "Failed to retrieve SDR temperature data.")
     return sdr_output
 
-# TODO: Implement more specific temperature parsing here based on sdr_output and server generation
-# def parse_temperatures(sdr_data, server_gen_info):
-#     pass
+def parse_temperatures(sdr_data, cpu1_pattern, cpu2_pattern, inlet_pattern, exhaust_pattern):
+    """
+    Parses the output of 'ipmitool sdr type temperature' to extract specific temps.
+    sdr_data: The raw string output from the ipmitool command.
+    *_pattern: Regex patterns to identify specific sensor lines.
+    Returns a dictionary of temperatures.
+    """
+    temps = {
+        "cpu1_temp": None,
+        "cpu2_temp": None,
+        "inlet_temp": None,
+        "exhaust_temp": None
+    }
+    if not sdr_data:
+        _log("warning", "SDR data is empty, cannot parse temperatures.")
+        return temps
 
+    # General regex to find lines with temperature readings
+    # Example line: "CPU1 Temp        | 30h | ok  |  3.1 | 34 degrees C"
+    # Or sometimes:   "Temp             | 0Eh | ns  |  3.1 | 20 C" (no "degrees")
+    # Or:             "Ambient Temp     | 32h | ok  | 30.1 | 23 degrees C"
+    temp_line_regex = re.compile(r"^(.*?)\s*\|\s*[\da-fA-F]+h\s*\|\s*(ok|ns|cr|nr)\s*.*?\|\s*(\d+)\s*(?:degrees C|C)", re.IGNORECASE)
+
+    lines = sdr_data.splitlines()
+    
+    # Helper to extract temperature if a pattern matches
+    def extract_temp(line_content, pattern_to_search, current_value):
+        if current_value is not None: # If already found, don't overwrite (e.g. if multiple sensors match a loose pattern)
+            return current_value
+        if pattern_to_search and re.search(pattern_to_search, line_content, re.IGNORECASE):
+            match_temp = temp_line_regex.match(line_content)
+            if match_temp:
+                try:
+                    return int(match_temp.group(3))
+                except (ValueError, IndexError):
+                    _log("debug", f"Could not parse temperature value from line: {line_content}")
+        return None
+
+    for line in lines:
+        line_content = line.strip()
+        
+        # Try to extract CPU1 Temp
+        temp_val = extract_temp(line_content, cpu1_pattern, temps["cpu1_temp"])
+        if temp_val is not None and temps["cpu1_temp"] is None : # Prioritize first match for CPU1
+            temps["cpu1_temp"] = temp_val
+            _log("debug", f"Found CPU1 Temp: {temp_val}°C from line: {line_content}")
+            continue # Move to next line once CPU1 is found by its specific pattern, to avoid generic patterns overwriting
+
+        # Try to extract CPU2 Temp (only if CPU1 was not also matched by this line with a looser CPU2 pattern)
+        temp_val = extract_temp(line_content, cpu2_pattern, temps["cpu2_temp"])
+        if temp_val is not None and temps["cpu2_temp"] is None:
+            # Avoid re-assigning CPU1 if cpu2_pattern is too generic and also matches CPU1 line
+            is_cpu1_line = cpu1_pattern and re.search(cpu1_pattern, line_content, re.IGNORECASE)
+            if not is_cpu1_line:
+                 temps["cpu2_temp"] = temp_val
+                 _log("debug", f"Found CPU2 Temp: {temp_val}°C from line: {line_content}")
+                 continue
+
+        # Try to extract Inlet Temp
+        temp_val = extract_temp(line_content, inlet_pattern, temps["inlet_temp"])
+        if temp_val is not None and temps["inlet_temp"] is None:
+            temps["inlet_temp"] = temp_val
+            _log("debug", f"Found Inlet Temp: {temp_val}°C from line: {line_content}")
+            continue
+
+        # Try to extract Exhaust Temp
+        temp_val = extract_temp(line_content, exhaust_pattern, temps["exhaust_temp"])
+        if temp_val is not None and temps["exhaust_temp"] is None:
+            temps["exhaust_temp"] = temp_val
+            _log("debug", f"Found Exhaust Temp: {temp_val}°C from line: {line_content}")
+            continue
+            
+    if temps["cpu1_temp"] is None:
+        _log("warning", f"Could not find CPU1 temperature using pattern: {cpu1_pattern}")
+    if temps["cpu2_temp"] is None and cpu2_pattern: # Only warn if a pattern was provided
+        _log("info", f"CPU2 temperature not found or not applicable using pattern: {cpu2_pattern}")
+
+
+    return temps
+
+# You might want to keep the retrieve_temperatures_raw() function as well,
+# so main.py calls that, then passes the raw data to parse_temperatures().
 # TODO: Implement PCIe card control functions if desired, with generation checks
 # def disable_third_party_pcie_cooling_response():
 #     pass
