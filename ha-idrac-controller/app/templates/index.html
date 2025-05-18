@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>iDRAC Controller Admin</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>HA iDRAC Controller</h1>
+        <p>Welcome to the admin panel for your Dell iDRAC Fan Controller.</p>
+        
+        <h2>Status</h2>
+        <p><strong>Configured iDRAC IP:</strong> {{ idrac_ip }}</p>
+        <p><strong>CPU1 Temperature:</strong> {{ status.cpu1_temp }}</p>
+        <p><strong>Current Fan Target:</strong> {{ status.current_fan_speed_target }}%</p>
+
+        <h2>Configuration</h2>
+        <p><a href="{{ url_for('settings') }}">Configure Fan Curve & Settings</a></p>
+
+        <h2>Current Fan Curve</h2>
+        {% if fan_curve %}
+            <ul>
+            {% for point in fan_curve %}
+                <li>If CPU Temp &ge; {{ point.temp }}°C &rarr; Set Fans to {{ point.speed }}%</li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p>No fan curve configured yet. Please go to settings.</p>
+        {% endif %}
+        
+        </div>
+</body>
+</html>
