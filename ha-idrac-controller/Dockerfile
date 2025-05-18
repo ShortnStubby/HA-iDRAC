@@ -1,18 +1,14 @@
 # HA-iDRAC/ha-idrac-controller/Dockerfile
 
-# Temporarily hardcode 'amd64' for testing.
-# Replace $(arch) with amd64 if you are building on an amd64 system for testing.
-FROM ghcr.io/home-assistant/amd64-base-python:3.12.3-slim-bookworm
+# Test with a different HA base image from ghcr.io
+FROM ghcr.io/home-assistant/amd64-base:stable 
+# Or try: FROM ghcr.io/home-assistant/amd64-base:latest
 
-# Install system dependencies
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    ipmitool \
-    bash \
- && rm -rf /var/lib/apt/lists/*
+# Add a simple command to see if this step runs
+RUN echo "Home Assistant amd64-base image pulled successfully."
 
-WORKDIR /app
-COPY app/ /app/
-RUN pip install --no-cache-dir -r requirements.txt
-COPY run.sh /
-RUN chmod +x /run.sh
+# Comment out the rest of your Dockerfile for this specific test
+# RUN apt-get update && \
+# ...
+# WORKDIR /app
+# ...
