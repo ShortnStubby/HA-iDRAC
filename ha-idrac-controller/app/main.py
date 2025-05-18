@@ -94,7 +94,7 @@ def load_and_configure():
         print(f"[WARNING] Could not determine server model. Temperature parsing might be affected.", flush=True)
 
     # Based on R720 output "Temp             | 0Eh | ok  |  3.1 | 43 degrees C"
-    server_info["cpu_generic_temp_pattern"] = r"^Temp\s" 
+    server_info["cpu_generic_temp_pattern"] = r"^Temp$" 
     server_info["inlet_temp_name_pattern"] = r"Inlet Temp"
     server_info["exhaust_temp_name_pattern"] = r"Exhaust Temp"
     print(f"[{log_level.upper()}] Using temp patterns: CPU_generic='{server_info['cpu_generic_temp_pattern']}', Inlet='{server_info['inlet_temp_name_pattern']}', Exhaust='{server_info['exhaust_temp_name_pattern']}'", flush=True)
