@@ -4,31 +4,70 @@
     <meta charset="UTF-8">
     <title>iDRAC Controller Admin</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <meta http-equiv="refresh" content="30">
 </head>
 <body>
     <div class="container">
         <h1>HA iDRAC Controller</h1>
-        <p>Welcome to the admin panel for your Dell iDRAC Fan Controller.</p>
+        <p><em>Page auto-refreshes every 30 seconds.</em> Last status update: {{ status.last_updated }}</p>
         
-        <h2>Status</h2>
+        <h2>Live Status</h2>
         <p><strong>Configured iDRAC IP:</strong> {{ idrac_ip }}</p>
-        <p><strong>CPU1 Temperature:</strong> {{ status.cpu1_temp }}</p>
-        <p><strong>Current Fan Target:</strong> {{ status.current_fan_speed_target }}%</p>
-
-        <h2>Configuration</h2>
-        <p><a href="{{ url_for('settings') }}">Configure Fan Curve & Settings</a></p>
-
-        <h2>Current Fan Curve</h2>
-        {% if fan_curve %}
+        <p><strong>Hottest CPU Temperature:</strong> 
+            {{ status.hottest_cpu_temp_c if status.hottest_cpu_temp_c is not none else 'N/A' }}°C
+        </p>
+        {% if status.cpu_temps_c and status.cpu_temps_c|length > 0 %}
+            <p><strong>All CPU Temperatures:</strong> 
+                {% for temp in status.cpu_temps_c %}
+                    {{ temp if temp is not none else 'N/A' }}°C{% if not loop.last %}, {% endif %}
+                {% endfor %}
+            </p>
+        {% else %}
+            <p><strong>All CPU Temperatures:</strong> N/A</p>
+        {% endif %}
+        <p><strong>Inlet Temperature:</strong> 
+            {{ status.inlet_temp_c if status.inlet_temp_c is not none else 'N/A' }}°C
+        </p>
+        <p><strong>Exhaust Temperature:</strong> 
+            {{ status.exhaust_temp_c if status.exhaust_temp_c is not none else 'N/A' }}°C
+        </p>
+        <p><strong>Target Fan Speed:</strong> 
+            {{ status.target_fan_speed_percent if status.target_fan_speed_percent is not none else 'N/A' }}
+            {{ '%' if status.target_fan_speed_percent is not none and status.target_fan_speed_percent not in ["Dell Auto", "Dell Auto (Safety)"] else '' }}
+        </p>
+        {% if status.actual_fan_rpms %}
+            <h3>Actual Fan Speeds (RPM)</h3>
             <ul>
-            {% for point in fan_curve %}
+            {% for fan in status.actual_fan_rpms %}
+                <li>{{ fan.name }}: {{ fan.rpm }} RPM</li>
+            {% else %}
+                <li>No fan RPM data available.</li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p><strong>Actual Fan Speeds (RPM):</strong> N/A</p>
+        {% endif %}
+
+        <h2>Configuration Mode</h2>
+        <p>Currently using <strong>Simple Fan Mode</strong> based on settings from Home Assistant Add-on Configuration tab:</p>
+        <ul>
+            <li>Temperature Unit: {{ simple_fan_mode_settings.temp_unit }}</li>
+            <li>Base Fan Speed: {{ simple_fan_mode_settings.base_fan }}% (when CPU < {{ simple_fan_mode_settings.low_thresh }}°{{ simple_fan_mode_settings.temp_unit }})</li>
+            <li>High Temp Fan Speed: {{ simple_fan_mode_settings.high_fan }}% (when CPU &ge; {{ simple_fan_mode_settings.low_thresh }}°{{ simple_fan_mode_settings.temp_unit }} and < {{ simple_fan_mode_settings.crit_thresh }}°{{ simple_fan_mode_settings.temp_unit }})</li>
+            <li>Critical Temp: &ge; {{ simple_fan_mode_settings.crit_thresh }}°{{ simple_fan_mode_settings.temp_unit }} (reverts to Dell auto control)</li>
+        </ul>
+
+        <p><a href="{{ url_for('settings') }}">Configure Advanced Fan Curve (currently not used by main logic)</a></p>
+        {% if advanced_fan_curve %}
+            <h3>Advanced Fan Curve (from /data/app_config.json)</h3>
+            <ul>
+            {% for point in advanced_fan_curve %}
                 <li>If CPU Temp &ge; {{ point.temp }}°C &rarr; Set Fans to {{ point.speed }}%</li>
             {% endfor %}
             </ul>
         {% else %}
-            <p>No fan curve configured yet. Please go to settings.</p>
+            <p>No advanced fan curve configured.</p>
         {% endif %}
-        
-        </div>
+    </div>
 </body>
 </html>
