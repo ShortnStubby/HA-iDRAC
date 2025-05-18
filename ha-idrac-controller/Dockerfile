@@ -1,36 +1,30 @@
 # HA-iDRAC/ha-idrac-controller/Dockerfile
+# We've discovered ghcr.io/home-assistant/amd64-base-python:latest is currently Alpine-based in this environment
 FROM ghcr.io/home-assistant/amd64-base-python:latest
 
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+# Alpine's default shell is ash. Bash was found to be present in the diagnostic,
+# but we can ensure commands run with it if needed, or just let apk run with ash.
+# The SHELL directive is fine to keep if bash is indeed present and preferred for complex RUN lines.
+SHELL ["/bin/bash", "-o", "pipefail", "-c"] # Bash was found in the Alpine image.
 
-# --- Start Diagnostic Block (Modified to bust cache) ---
-RUN echo "===== DIAGNOSTIC INFORMATION V2 =====" && \
-    echo "Step 1: Running as user: $(whoami)" && \
-    echo "Step 2: Current Shell ENV VAR: $SHELL (Note: this env var shows default, not necessarily the one used by RUN)" && \
-    echo "Step 3: Bash Version Check: $(bash --version || echo 'bash command not found or errored')" && \
-    echo "Step 4: Current PATH: $PATH" && \
-    echo "Step 5: Listing /usr/bin to find apt-get:" && \
-    (ls -l /usr/bin/apt-get || echo "/usr/bin/apt-get not found") && \
-    echo "Step 6: Output of 'which apt-get': $(which apt-get || echo 'which apt-get: command not found')" && \
-    echo "Step 7: Listing /bin:" && \
-    ls -l /bin && \
-    echo "Step 8: Listing /sbin for apk (Alpine check):" && \
-    (ls -l /sbin/apk || echo "/sbin/apk not found (expected for Debian)") && \
-    echo "Step 9: Trying apt-cache to see if apt tools are responsive (pre-update):" && \
-    (apt-cache policy ipmitool || echo "apt-cache command failed or not found") && \
-    echo "===== END DIAGNOSTIC INFORMATION V2 ====="
-
-# The original command that is failing
-RUN echo "Attempting apt-get update and install..." && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-    ipmitool \
- && rm -rf /var/lib/apt/lists/*
+# Use apk to install packages on Alpine
+RUN echo "Attempting apk update and add for Alpine..." && \
+    apk update && \
+    apk add --no-cache \
+        ipmitool \
+        bash \  
+    && echo "Packages installed successfully with apk."
 
 # --- Rest of your Dockerfile ---
 WORKDIR /app
+
+# Copy requirements first to leverage Docker cache
 COPY app/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application code
 COPY app/ /app/
+
+# Copy run.sh to root and make executable
 COPY run.sh /
 RUN chmod +x /run.sh
