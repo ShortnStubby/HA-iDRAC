@@ -2,7 +2,7 @@
 
 # Use a specific patch version for the Python base image.
 # This is a default and will be overridden by build.json for specific architectures.
-ARG BUILD_FROM="ghcr.io/home-assistant/python-base:3.12.3-slim" 
+ARG BUILD_FROM="ghcr.io/home-assistant/python-base:3.12.3-slim-bookworm"
 FROM ${BUILD_FROM}
 
 # Install system dependencies
