@@ -28,11 +28,7 @@ def configure_ipmi(ip, user, password, conn_type="lanplus", log_level="info"):
 
 # --- Logging ---
 def _log(level, message):
-    # This log function relies on addon_options being available if main.py imports this module.
-    # A more robust way would be to pass the logger or log_level.
-    # For now, assuming main.py's global addon_options can be seen or _LOG_LEVEL is set by configure_ipmi.
     levels = {"trace": -1, "debug": 0, "info": 1, "warning": 2, "error": 3, "fatal": 4}
-    # Use the module-level _LOG_LEVEL set by configure_ipmi
     if levels.get(_LOG_LEVEL, levels["info"]) <= levels.get(level.lower(), levels["info"]):
         print(f"[{level.upper()}] IPMI: {message}", flush=True)
 
@@ -103,10 +99,9 @@ def apply_user_fan_control_profile(decimal_fan_speed):
     return result
 
 # --- Sensor Data Retrieval & Parsing ---
-def get_server_model_info():
+def get_server_model_info(): # (Keep this function as is from previous version)
     _log("info", "Attempting to retrieve server model information...")
     fru_data = _run_ipmi_command(["fru"], is_raw_command=False, timeout=20)
-    
     if fru_data:
         model_info = {"manufacturer": "Unknown", "model": "Unknown"}
         for line in fru_data.splitlines():
@@ -115,107 +110,72 @@ def get_server_model_info():
                 model_info["manufacturer"] = line.split(":", 1)[1].strip()
             elif "product name" in line_l and ":" in line:
                 model_info["model"] = line.split(":", 1)[1].strip()
-        
         if not model_info["manufacturer"] or model_info["manufacturer"] == "Unknown":
             for line in fru_data.splitlines():
                 if "board mfg" in line.lower() and ":" in line:
-                    model_info["manufacturer"] = line.split(":", 1)[1].strip()
-                    break
+                    model_info["manufacturer"] = line.split(":", 1)[1].strip(); break
         if not model_info["model"] or model_info["model"] == "Unknown":
             for line in fru_data.splitlines():
                  if "board product" in line.lower() and ":" in line:
-                    model_info["model"] = line.split(":", 1)[1].strip()
-                    break
+                    model_info["model"] = line.split(":", 1)[1].strip(); break
         _log("info", f"Server Info Raw: Manufacturer='{model_info['manufacturer']}', Model='{model_info['model']}'")
-        if "dell" in model_info.get("manufacturer","").lower():
-            model_info["manufacturer"] = "DELL" # Standardize
+        if "dell" in model_info.get("manufacturer","").lower(): model_info["manufacturer"] = "DELL"
         return model_info
     _log("warning", "Could not retrieve server model information from FRU data.")
     return None
 
-def retrieve_temperatures_raw():
+def retrieve_temperatures_raw(): # (Keep this function as is)
     _log("debug", "Retrieving raw temperature SDR data...")
     sdr_output = _run_ipmi_command(["sdr", "type", "temperature"], is_raw_command=False)
-    if sdr_output:
-        _log("debug", "Successfully retrieved SDR temperature data.")
-    else:
-        _log("warning", "Failed to retrieve SDR temperature data.")
+    if sdr_output: _log("debug", "Successfully retrieved SDR temperature data.")
+    else: _log("warning", "Failed to retrieve SDR temperature data.")
     return sdr_output
 
-def parse_temperatures(sdr_data, 
-                       cpu_generic_pattern_str, 
-                       inlet_pattern_str, 
-                       exhaust_pattern_str):
+def parse_temperatures(sdr_data, cpu_generic_pattern_str, inlet_pattern_str, exhaust_pattern_str): # (Keep this function as is from previous version)
     temps = { "cpu_temps": [], "inlet_temp": None, "exhaust_temp": None }
-    if not sdr_data:
-        _log("warning", "SDR data is empty for temperature parsing.")
-        return temps
-
+    if not sdr_data: _log("warning", "SDR data empty for temp parsing."); return temps
     _log("debug", f"Compiling temp regex: CPU='{cpu_generic_pattern_str}', Inlet='{inlet_pattern_str}', Exhaust='{exhaust_pattern_str}'")
     try:
         cpu_generic_pattern = re.compile(cpu_generic_pattern_str, re.IGNORECASE) if cpu_generic_pattern_str else None
         inlet_pattern = re.compile(inlet_pattern_str, re.IGNORECASE) if inlet_pattern_str else None
         exhaust_pattern = re.compile(exhaust_pattern_str, re.IGNORECASE) if exhaust_pattern_str else None
-    except re.error as e:
-        _log("error", f"Invalid regex for temperature parsing: {e}")
-        return temps 
-
-    temp_line_regex = re.compile(
-        r"^(.*?)\s*\|\s*[\da-fA-F]+h\s*\|\s*(?:ok|ns|nr|cr|u|\[Unknown\])\s*.*?\|\s*([-+]?\d*\.?\d+)\s*(?:degrees C|C)", 
-        re.IGNORECASE
-    )
-    
+    except re.error as e: _log("error", f"Invalid regex for temp parsing: {e}"); return temps 
+    temp_line_regex = re.compile(r"^(.*?)\s*\|\s*[\da-fA-F]+h\s*\|\s*(?:ok|ns|nr|cr|u|\[Unknown\])\s*.*?\|\s*([-+]?\d*\.?\d+)\s*(?:degrees C|C)", re.IGNORECASE)
     _log("debug", "Parsing SDR lines for temperatures...")
     lines = sdr_data.splitlines()
     inlet_found, exhaust_found = False, False
-
     for i, line in enumerate(lines):
         line_content = line.strip()
         _log("trace", f"Processing Temp Line {i+1}: '{line_content}'")
-        
         match_temp = temp_line_regex.match(line_content)
         if match_temp:
             sensor_name = match_temp.group(1).strip()
             temp_val_str = match_temp.group(2)
             _log("trace", f"  Line matched main temp regex. Sensor: '{sensor_name}', ValueStr: '{temp_val_str}'")
-            try:
-                temp_value = int(float(temp_val_str))
-            except (ValueError, IndexError) as e:
-                _log("warning", f"  Could not parse numeric temp ('{temp_val_str}') from: {line_content}. Error: {e}")
-                continue
-
+            try: temp_value = int(float(temp_val_str))
+            except (ValueError, IndexError) as e: _log("warning", f"  Could not parse numeric temp ('{temp_val_str}') from: {line_content}. Error: {e}"); continue
             if not inlet_found and inlet_pattern and inlet_pattern.search(sensor_name):
-                temps["inlet_temp"] = temp_value
-                inlet_found = True
-                _log("debug", f"  MATCHED INLET: '{sensor_name}' as {temp_value}°C")
-                continue 
-            
+                temps["inlet_temp"] = temp_value; inlet_found = True
+                _log("debug", f"  MATCHED INLET: '{sensor_name}' as {temp_value}°C"); continue 
             if not exhaust_found and exhaust_pattern and exhaust_pattern.search(sensor_name):
-                temps["exhaust_temp"] = temp_value
-                exhaust_found = True
-                _log("debug", f"  MATCHED EXHAUST: '{sensor_name}' as {temp_value}°C")
-                continue
-
+                temps["exhaust_temp"] = temp_value; exhaust_found = True
+                _log("debug", f"  MATCHED EXHAUST: '{sensor_name}' as {temp_value}°C"); continue
             if cpu_generic_pattern and cpu_generic_pattern.search(sensor_name):
                 is_already_cat = (inlet_found and inlet_pattern and inlet_pattern.search(sensor_name)) or \
                                  (exhaust_found and exhaust_pattern and exhaust_pattern.search(sensor_name))
                 if not is_already_cat:
                     temps["cpu_temps"].append(temp_value)
                     _log("debug", f"  MATCHED GENERIC CPU: '{sensor_name}' as {temp_value}°C, added to list.")
-                else:
-                     _log("trace", f"  Generic CPU pattern matched '{sensor_name}', but it was already categorized as Inlet/Exhaust.")
-        else:
-            _log("trace", f"  Line did not match temp_line_regex: {line_content}")
-            
+                else: _log("trace", f"  Generic CPU pattern matched '{sensor_name}', but already categorized.")
+        else: _log("trace", f"  Line did not match temp_line_regex: {line_content}")
     if not temps["cpu_temps"]: _log("warning", f"No CPU temperature sensors found using pattern: {cpu_generic_pattern_str}")
-    # It's okay if these are not found, they might not be present on all systems or a pattern might be missing
     if not inlet_found and inlet_pattern_str : _log("info", f"Inlet temperature sensor not found using pattern: {inlet_pattern_str}")
     if not exhaust_found and exhaust_pattern_str: _log("info", f"Exhaust temperature sensor not found using pattern: {exhaust_pattern_str}")
     return temps
 
 def retrieve_fan_rpms_raw():
     _log("debug", "Retrieving raw fan SDR data...")
-    sdr_output = _run_ipmi_command(["sdr", "type", "fan"], is_raw_command=False)
+    sdr_output = _run_ipmi_command(["sdr", "type", "fan"], is_raw_command=False, timeout=10) # Fans usually respond faster
     if sdr_output:
         _log("debug", "Successfully retrieved SDR fan data.")
     else:
@@ -223,18 +183,18 @@ def retrieve_fan_rpms_raw():
     return sdr_output
 
 def parse_fan_rpms(sdr_data):
-    """
-    Parses 'ipmitool sdr type fan' output for fan RPMs.
-    Returns a list of dictionaries: [{"name": "Fan1A Tach", "rpm": 2040}, ...]
-    """
     fans = []
     if not sdr_data:
         _log("warning", "SDR data is empty for fan RPM parsing.")
         return fans
 
     # Example line: Fan1A Tach       | 30h | ok  |  7.1 | 2040 RPM
+    # Some fans might be "Fan Modi OCP" or similar, not just Tach.
+    # We need a regex that captures the name and the RPM value.
+    # This regex tries to capture a fan name (group 1) that might contain "Fan" or "Tach",
+    # and the RPM value (group 3).
     fan_line_regex = re.compile(
-        r"^(.*?)\s*\|\s*[\da-fA-F]+h\s*\|\s*(?:ok|ns|nr|cr|u|\[Unknown\])\s*.*?\|\s*([\d\.]+)\s*RPM", 
+        r"^(.*?Fan.*?|.*?Tach.*?)\s*\|\s*[\da-fA-F]+h\s*\|\s*(?:ok|ns|nr|cr|u|\[Unknown\])\s*.*?\|\s*([\d\.]+)\s*RPM",
         re.IGNORECASE
     )
     _log("debug", "Parsing SDR lines for fan RPMs...")
@@ -246,7 +206,7 @@ def parse_fan_rpms(sdr_data):
         match_fan = fan_line_regex.match(line_content)
         if match_fan:
             fan_name = match_fan.group(1).strip()
-            rpm_str = match_fan.group(2)
+            rpm_str = match_fan.group(2) # Changed from group 3 due to regex simplification
             _log("trace", f"  Line matched fan_line_regex. Fan: '{fan_name}', RPM_Str: '{rpm_str}'")
             try:
                 rpm_value = int(float(rpm_str))
@@ -255,7 +215,7 @@ def parse_fan_rpms(sdr_data):
             except (ValueError, IndexError) as e:
                 _log("warning", f"  Could not parse numeric RPM value ('{rpm_str}') from: {line_content}. Error: {e}")
         else:
-            _log("trace", f"  Line did not match fan_line_regex: {line_content}")
+            _log("trace", f"  Line did not match fan_line_regex (looking for 'RPM'): {line_content}")
             
     if not fans: _log("info", "No fan RPMs found or parsed.")
     return fans

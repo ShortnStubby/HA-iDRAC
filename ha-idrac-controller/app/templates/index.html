@@ -4,12 +4,11 @@
     <meta charset="UTF-8">
     <title>iDRAC Controller Admin</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <meta http-equiv="refresh" content="30">
-</head>
+    <meta http-equiv="refresh" content="30"> </head>
 <body>
     <div class="container">
         <h1>HA iDRAC Controller</h1>
-        <p><em>Page auto-refreshes every 30 seconds.</em> Last status update: {{ status.last_updated }}</p>
+        <p><em>Page auto-refreshes.</em> Last status update: <strong>{{ status.last_updated }}</strong></p>
         
         <h2>Live Status</h2>
         <p><strong>Configured iDRAC IP:</strong> {{ idrac_ip }}</p>
@@ -33,40 +32,40 @@
         </p>
         <p><strong>Target Fan Speed:</strong> 
             {{ status.target_fan_speed_percent if status.target_fan_speed_percent is not none else 'N/A' }}
-            {{ '%' if status.target_fan_speed_percent is not none and status.target_fan_speed_percent not in ["Dell Auto", "Dell Auto (Safety)"] else '' }}
+            {% if status.target_fan_speed_percent is number and status.target_fan_speed_percent != "N/A" %}%{% endif %}
         </p>
-        {% if status.actual_fan_rpms %}
-            <h3>Actual Fan Speeds (RPM)</h3>
+        
+        <h3>Actual Fan Speeds (RPM)</h3>
+        {% if status.actual_fan_rpms and status.actual_fan_rpms|length > 0 %}
             <ul>
             {% for fan in status.actual_fan_rpms %}
-                <li>{{ fan.name }}: {{ fan.rpm }} RPM</li>
-            {% else %}
-                <li>No fan RPM data available.</li>
+                <li><strong>{{ fan.name }}:</strong> {{ fan.rpm }} RPM</li>
+            {% else %} <li>No fan RPM data currently available.</li>
             {% endfor %}
             </ul>
         {% else %}
-            <p><strong>Actual Fan Speeds (RPM):</strong> N/A</p>
+            <p>No fan RPM data currently available or not yet retrieved.</p>
         {% endif %}
 
         <h2>Configuration Mode</h2>
         <p>Currently using <strong>Simple Fan Mode</strong> based on settings from Home Assistant Add-on Configuration tab:</p>
         <ul>
             <li>Temperature Unit: {{ simple_fan_mode_settings.temp_unit }}</li>
-            <li>Base Fan Speed: {{ simple_fan_mode_settings.base_fan }}% (when CPU < {{ simple_fan_mode_settings.low_thresh }}°{{ simple_fan_mode_settings.temp_unit }})</li>
-            <li>High Temp Fan Speed: {{ simple_fan_mode_settings.high_fan }}% (when CPU &ge; {{ simple_fan_mode_settings.low_thresh }}°{{ simple_fan_mode_settings.temp_unit }} and < {{ simple_fan_mode_settings.crit_thresh }}°{{ simple_fan_mode_settings.temp_unit }})</li>
+            <li>Base Fan Speed: {{ simple_fan_mode_settings.base_fan }}% (when CPU &lt; {{ simple_fan_mode_settings.low_thresh }}°{{ simple_fan_mode_settings.temp_unit }})</li>
+            <li>High Temp Fan Speed: {{ simple_fan_mode_settings.high_fan }}% (when CPU &ge; {{ simple_fan_mode_settings.low_thresh }}°{{ simple_fan_mode_settings.temp_unit }} and &lt; {{ simple_fan_mode_settings.crit_thresh }}°{{ simple_fan_mode_settings.temp_unit }})</li>
             <li>Critical Temp: &ge; {{ simple_fan_mode_settings.crit_thresh }}°{{ simple_fan_mode_settings.temp_unit }} (reverts to Dell auto control)</li>
         </ul>
 
-        <p><a href="{{ url_for('settings') }}">Configure Advanced Fan Curve (currently not used by main logic)</a></p>
+        <p><a href="{{ url_for('settings') }}">Configure Advanced Fan Curve (Note: main logic currently uses Simple Mode from HA config)</a></p>
         {% if advanced_fan_curve %}
-            <h3>Advanced Fan Curve (from /data/app_config.json)</h3>
+            <h3>Advanced Fan Curve (from <code>/data/app_config.json</code>)</h3>
             <ul>
             {% for point in advanced_fan_curve %}
                 <li>If CPU Temp &ge; {{ point.temp }}°C &rarr; Set Fans to {{ point.speed }}%</li>
             {% endfor %}
             </ul>
         {% else %}
-            <p>No advanced fan curve configured.</p>
+            <p>No advanced fan curve configured in <code>/data/app_config.json</code>.</p>
         {% endif %}
     </div>
 </body>
