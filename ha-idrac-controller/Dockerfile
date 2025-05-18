@@ -3,7 +3,7 @@ FROM ghcr.io/home-assistant/amd64-base-python:latest
 
 # Explicitly set the shell for RUN commands to bash
 # This ensures apt-get and other commands are found correctly.
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+# SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Install system dependencies
 RUN apt update
