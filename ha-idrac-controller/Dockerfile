@@ -5,7 +5,7 @@ FROM ghcr.io/home-assistant/amd64-base-python:latest
 # Alpine's default shell is ash. Bash was found to be present in the diagnostic,
 # but we can ensure commands run with it if needed, or just let apk run with ash.
 # The SHELL directive is fine to keep if bash is indeed present and preferred for complex RUN lines.
-SHELL ["/bin/bash", "-o", "pipefail", "-c"] # Bash was found in the Alpine image.
+SHELL ["/bin/bash", "-o", "pipefail", "-c"] 
 
 # Use apk to install packages on Alpine
 RUN echo "Attempting apk update and add for Alpine..." && \
