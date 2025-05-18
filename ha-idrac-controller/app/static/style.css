@@ -1,24 +1,54 @@
 /* HA-iDRAC/ha-idrac-controller/app/static/style.css */
+
+/* --- Base Styles & HA Theme Variables --- */
 body {
-    font-family: Arial, sans-serif;
-    margin: 20px;
-    background-color: #f4f4f4;
-    color: #333;
+    font-family: var(--paper-font-body_-_font-family, Roboto, Noto, sans-serif);
+    font-size: var(--paper-font-body_-_font-size, 14px);
+    background-color: var(--primary-background-color);
+    color: var(--primary-text-color);
+    margin: 0; /* Remove default margin */
+    padding: 16px; /* Add some padding around the content */
+    line-height: 1.5;
 }
 
 .container {
-    background-color: #fff;
-    padding: 20px;
-    border-radius: 8px;
-    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    background-color: var(--card-background-color, var(--secondary-background-color, #fff)); /* Use card color, fallback to secondary, then white */
+    padding: 16px;
+    border-radius: var(--ha-card-border-radius, 12px); /* Use HA's card border radius */
+    box-shadow: var(--ha-card-box-shadow, 0px 2px 1px -1px rgba(0,0,0,0.2), 0px 1px 1px 0px rgba(0,0,0,0.14), 0px 1px 3px 0px rgba(0,0,0,0.12)); /* Use HA's card box shadow */
+    max-width: 800px; /* Max width for content for better readability */
+    margin: 0 auto;   /* Center the container */
 }
 
-h1, h2, h3 {
-    color: #333;
+h1, h2, h3, h4, h5, h6 {
+    color: var(--primary-text-color);
+    font-weight: var(--paper-font-headline_-_font-weight, 400); /* Match HA header font weight */
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+}
+
+h1 {
+    font-size: var(--paper-font-headline_-_font-size, 24px);
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid var(--divider-color, #e0e0e0);
+    margin-bottom: 1em;
+}
+
+h2 {
+    font-size: var(--paper-font-title_-_font-size, 20px);
+}
+
+h3 {
+    font-size: var(--paper-font-subhead_-_font-size, 16px);
+    color: var(--secondary-text-color); /* Subheadings can be slightly lighter */
+}
+
+p {
+    margin-bottom: 1em;
 }
 
 a {
-    color: #007bff;
+    color: var(--primary-color); /* HA's primary accent color for links */
     text-decoration: none;
 }
 
@@ -26,59 +56,187 @@ a:hover {
     text-decoration: underline;
 }
 
-input[type="text"], input[type="password"], input[type="number"] {
-    padding: 8px;
-    margin-bottom: 10px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    width: calc(100% - 20px); /* Basic responsiveness */
-    max-width: 400px;
+strong {
+    font-weight: var(--paper-font-common-nowrap_-_font-weight, 500); /* Bolder text */
 }
 
-input[type="submit"], button[type="button"] {
-    background-color: #007bff;
-    color: white;
+/* --- Form Elements --- */
+input[type="text"],
+input[type="password"],
+input[type="number"],
+input[type="email"],
+select {
+    display: block; /* Make them take full width available */
+    width: calc(100% - 22px); /* Account for padding and border */
+    max-width: 400px; /* Limit max width */
+    padding: 10px;
+    margin-bottom: 15px;
+    border: 1px solid var(--divider-color, #ccc);
+    border-radius: var(--ha-card-border-radius, 12px);
+    background-color: var(--input-fill-color, var(--secondary-background-color, #fff));
+    color: var(--input-ink-color, var(--primary-text-color, #000));
+    font-size: 1rem;
+    box-sizing: border-box;
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+input[type="email"]:focus,
+select:focus {
+    border-color: var(--primary-color);
+    outline: none;
+    box-shadow: 0 0 0 2px var(--primary-color-opd, rgba(var(--rgb-primary-color), 0.2)); /* Focus ring */
+}
+
+label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 500;
+    color: var(--secondary-text-color);
+}
+
+input[type="submit"],
+button[type="button"],
+button { /* General button styling */
+    background-color: var(--primary-color);
+    color: var(--text-primary-color-on-primary, var(--text-primary-color, #fff)); /* Text color on primary button */
     padding: 10px 15px;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--ha-card-border-radius, 12px);
     cursor: pointer;
+    font-size: 1rem;
+    font-weight: 500;
+    transition: background-color 0.2s ease-in-out;
+    margin-right: 8px; /* Spacing between buttons */
     margin-top: 10px;
 }
 
-input[type="submit"]:hover, button[type="button"]:hover {
-    background-color: #0056b3;
+input[type="submit"]:hover,
+button[type="button"]:hover,
+button:hover {
+    background-color: var(--state-active-color, var(--dark-primary-color, #0056b3)); /* Darken on hover */
 }
 
+/* Specific button types if needed */
+button.destructive, input[type="submit"].destructive {
+    background-color: var(--error-color, #db4437);
+}
+button.destructive:hover, input[type="submit"].destructive:hover {
+    background-color: var(--error-color-dark, #a52714); /* Darken error color on hover */
+}
+
+
+/* --- Flash Messages (Alerts) --- */
 ul.flashes {
     list-style-type: none;
     padding: 0;
+    margin-bottom: 1em;
+}
+ul.flashes li {
+    padding: 10px 15px;
+    margin-bottom: 10px;
+    border: 1px solid transparent;
+    border-radius: var(--ha-card-border-radius, 12px);
 }
 ul.flashes li.error {
-    background-color: #f8d7da;
-    color: #721c24;
-    padding: 10px;
-    margin-bottom: 10px;
-    border: 1px solid #f5c6cb;
-    border-radius: 4px;
+    color: var(--error-state-color, #db4437); /* Using state color for text */
+    background-color: var(--error-L2-color, rgba(var(--rgb-error-color), 0.1)); /* Lighter background for error */
+    border-color: var(--error-L1-color, rgba(var(--rgb-error-color), 0.3)); /* Slightly darker border */
 }
 ul.flashes li.success {
-    background-color: #d4edda;
-    color: #155724;
-    padding: 10px;
-    margin-bottom: 10px;
-    border: 1px solid #c3e6cb;
-    border-radius: 4px;
+    color: var(--success-state-color, #0f9d58);
+    background-color: var(--success-L2-color, rgba(var(--rgb-success-color), 0.1));
+    border-color: var(--success-L1-color, rgba(var(--rgb-success-color), 0.3));
+}
+ul.flashes li.warning {
+    color: var(--warning-state-color, #f4b400);
+    background-color: var(--warning-L2-color, rgba(var(--rgb-warning-color), 0.1));
+    border-color: var(--warning-L1-color, rgba(var(--rgb-warning-color), 0.3));
 }
 
-.fan-point { margin-bottom: 10px; padding: 10px; border: 1px solid #ddd; background-color: #f9f9f9; border-radius: 4px;}
-.fan-point label { display: inline-block; width: 130px; margin-right: 5px; }
-.fan-point input[type="number"] { width: 70px; padding: 6px; margin-right: 10px;}
-.fan-point button { background-color: #dc3545; font-size: 0.8em; padding: 4px 8px;}
-.fan-point button:hover { background-color: #c82333; }
 
-button[type="button"] { /* Style for "Add Fan Curve Point" */
-    background-color: #28a745;
+/* --- Fan Curve Point Styling (from your settings.html) --- */
+.fan-point { 
+    margin-bottom: 15px; 
+    padding: 15px; 
+    border: 1px solid var(--divider-color, #ccc); 
+    background-color: var(--paper-listbox-background-color, var(--secondary-background-color, #f9f9f9)); /* Use listbox or secondary bg */
+    border-radius: var(--ha-card-border-radius, 12px);
+    display: flex; /* For better alignment of items */
+    flex-wrap: wrap; /* Allow wrapping on small screens */
+    align-items: center;
+    gap: 10px; /* Space between items */
 }
-button[type="button"]:hover {
-    background-color: #218838;
+.fan-point label { 
+    display: inline-block; 
+    /* width: auto; Remove fixed width for better flex */
+    margin-right: 5px; 
+    margin-bottom: 0; /* Remove bottom margin as it's in a flex row */
+    flex-shrink: 0; /* Prevent labels from shrinking */
+}
+.fan-point input[type="number"] { 
+    width: 80px; /* Slightly wider for temps/speeds */
+    padding: 8px; 
+    margin-right: 10px;
+    margin-bottom: 0; /* Remove bottom margin */
+}
+.fan-point button { /* Remove button */
+    background-color: var(--error-color, #dc3545);
+    font-size: 0.9em; 
+    padding: 6px 10px;
+    margin-left: auto; /* Push remove button to the right */
+}
+.fan-point button:hover { 
+    background-color: var(--error-color-dark, #c82333); 
+}
+
+/* Button to add fan curve points */
+button.add-point { /* Assuming you might add a class to this button */
+    background-color: var(--success-color, #28a745);
+}
+button.add-point:hover {
+    background-color: var(--success-color-dark, #218838);
+}
+
+/* --- Lists --- */
+ul, ol {
+    padding-left: 20px;
+}
+li {
+    margin-bottom: 0.5em;
+}
+
+/* --- Status Section Specifics (example) --- */
+.container h2 + p, /* Paragraph immediately following an H2 */
+.container h3 + ul, /* UL immediately following an H3 */
+.container h3 + p {
+    margin-top: 0.2em; /* Reduce top margin for paragraphs/lists directly under headings */
+}
+
+/* --- Responsive considerations --- */
+@media (max-width: 600px) {
+    body {
+        padding: 8px;
+    }
+    .container {
+        padding: 12px;
+    }
+    .fan-point {
+        flex-direction: column; /* Stack fan point items vertically on small screens */
+        align-items: flex-start;
+    }
+    .fan-point input[type="number"] {
+        width: 100%; /* Make inputs full width in stacked view */
+        margin-right: 0;
+        margin-bottom: 10px;
+    }
+    .fan_point label {
+        width: 100%; /* Make labels full width too */
+    }
+    .fan-point button {
+        margin-left: 0; /* Align remove button to the start */
+        width: 100%;
+        text-align: center;
+    }
 }
