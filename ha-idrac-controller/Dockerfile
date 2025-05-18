@@ -1,30 +1,33 @@
 # HA-iDRAC/ha-idrac-controller/Dockerfile
-# We've discovered ghcr.io/home-assistant/amd64-base-python:latest is currently Alpine-based in this environment
-FROM ghcr.io/home-assistant/amd64-base-python:latest
+# Use an official Python slim image based on Debian Bookworm
+FROM python:3.11-slim-bookworm
 
-# Alpine's default shell is ash. Bash was found to be present in the diagnostic,
-# but we can ensure commands run with it if needed, or just let apk run with ash.
-# The SHELL directive is fine to keep if bash is indeed present and preferred for complex RUN lines.
-SHELL ["/bin/bash", "-o", "pipefail", "-c"] 
+# Set the default shell for RUN commands to bash for consistency
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Use apk to install packages on Alpine
-RUN echo "Attempting apk update and add for Alpine..." && \
-    apk update && \
-    apk add --no-cache \
-        ipmitool \
-        bash \  
-    && echo "Packages installed successfully with apk."
+# Install system dependencies: ipmitool and bash (if not already primary), and jq
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ipmitool \
+    bash \
+    jq \  
+ && rm -rf /var/lib/apt/lists/*
 
-# --- Rest of your Dockerfile ---
+# Set the working directory
 WORKDIR /app
 
-# Copy requirements first to leverage Docker cache
+# Copy requirements.txt first to leverage Docker's build cache
 COPY app/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+# Ensure pip is up-to-date, then install requirements
+RUN python3 -m pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application code
+# Copy the rest of your application code from the 'app' subdirectory
 COPY app/ /app/
 
-# Copy run.sh to root and make executable
-COPY run.sh /
-RUN chmod +x /run.sh
+# Copy your run.sh script, make it executable, and place it where it's easy to call
+COPY run.sh /usr/local/bin/run.sh
+RUN chmod +x /usr/local/bin/run.sh
+
+# Set the command to run when the container starts
+CMD ["/usr/local/bin/run.sh"]
