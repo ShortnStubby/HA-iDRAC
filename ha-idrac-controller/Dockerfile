@@ -1,26 +1,15 @@
-# HA-iDRAC/ha-idrac-controller/Dockerfile
+# Comment out previous FROM lines for this test
+# ARG BUILD_FROM="ghcr.io/home-assistant/python-base:3.12.3-slim-bookworm"
+# FROM ${BUILD_FROM}
 
-# Use a specific patch version for the Python base image.
-# This is a default and will be overridden by build.json for specific architectures.
-ARG BUILD_FROM="ghcr.io/home-assistant/python-base:3.12.3-slim-bookworm"
-FROM ${BUILD_FROM}
+FROM alpine:latest
 
-# Install system dependencies
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    ipmitool \
-    bash \
- && rm -rf /var/lib/apt/lists/*
+# Add a simple command to see if this step runs
+RUN echo "Alpine image pulled successfully."
 
-# Set up the working directory for your application
-WORKDIR /app
-
-# Copy your Python application code into the image
-COPY app/ /app/
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy the run.sh script and make it executable
-COPY run.sh /
-RUN chmod +x /run.sh
+# Comment out the rest of your Dockerfile for this test
+# WORKDIR /app
+# COPY app/ /app/
+# RUN pip install --no-cache-dir -r requirements.txt
+# COPY run.sh /
+# RUN chmod +x /run.sh
