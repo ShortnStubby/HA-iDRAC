@@ -6,10 +6,8 @@ FROM ghcr.io/home-assistant/amd64-base-python:latest
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Install system dependencies
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    ipmitool \
-    # bash is listed here; it's fine if it's already the shell, apt-get will handle it.
+RUN apt-get update
+RUN apt-get install -y --no-install-recommends ipmitool \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
