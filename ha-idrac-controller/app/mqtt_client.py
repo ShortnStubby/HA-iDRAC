@@ -146,31 +146,43 @@ class MqttClient:
 
 
     def publish_static_sensor_discoveries(self):
-        """Publishes discovery for sensors that are always present."""
+        """Publishes discovery for sensors that are always present or have fixed names."""
         if not self.is_connected or not self.device_info_dict:
             self._log("warning", "MQTT not connected or device_info not set, skipping static discoveries.")
             return
         
         self._log("info", "Publishing static sensor discovery messages...")
+        # Inlet Temp
         self.publish_sensor_discovery(
             sensor_type_slug="inlet_temp", sensor_name="Inlet Temperature",
             device_class="temperature", unit_of_measurement="°C",
             value_template="{{ value_json.temperature | round(1) }}"
         )
+        # Exhaust Temp
         self.publish_sensor_discovery(
             sensor_type_slug="exhaust_temp", sensor_name="Exhaust Temperature",
             device_class="temperature", unit_of_measurement="°C",
             value_template="{{ value_json.temperature | round(1) }}"
         )
+        # Target Fan Speed
         self.publish_sensor_discovery(
             sensor_type_slug="target_fan_speed", sensor_name="Target Fan Speed",
             unit_of_measurement="%", icon="mdi:fan-chevron-up",
             value_template="{{ value_json.speed if value_json.speed is not none else 'Auto' }}"
         )
-        self.publish_sensor_discovery( # Hottest CPU temp sensor
+        # Hottest CPU Temp
+        self.publish_sensor_discovery(
             sensor_type_slug="hottest_cpu_temp", sensor_name="Hottest CPU Temp",
             device_class="temperature", unit_of_measurement="°C",
             value_template="{{ value_json.temperature | round(1) }}"
+        )
+        # Power Consumption (NEW)
+        self.publish_sensor_discovery(
+            sensor_type_slug="power_consumption", sensor_name="Power Consumption",
+            device_class="power", unit_of_measurement="W",
+            state_class="measurement", # For power sensors representing current consumption
+            icon="mdi:flash",
+            value_template="{{ value_json.power | round(0) }}"
         )
 
 

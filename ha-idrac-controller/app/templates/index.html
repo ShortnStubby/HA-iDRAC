@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <title>iDRAC Controller Admin</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <meta http-equiv="refresh" content="30"> </head>
+    <meta http-equiv="refresh" content="30">
+</head>
 <body>
     <div class="container">
         <h1>HA iDRAC Controller</h1>
@@ -21,14 +22,15 @@
                     {{ temp if temp is not none else 'N/A' }}°C{% if not loop.last %}, {% endif %}
                 {% endfor %}
             </p>
-        {% else %}
-            <p><strong>All CPU Temperatures:</strong> N/A</p>
         {% endif %}
         <p><strong>Inlet Temperature:</strong> 
             {{ status.inlet_temp_c if status.inlet_temp_c is not none else 'N/A' }}°C
         </p>
         <p><strong>Exhaust Temperature:</strong> 
             {{ status.exhaust_temp_c if status.exhaust_temp_c is not none else 'N/A' }}°C
+        </p>
+        <p><strong>Power Consumption:</strong>
+            {{ status.power_consumption_watts if status.power_consumption_watts is not none else 'N/A' }} W
         </p>
         <p><strong>Target Fan Speed:</strong> 
             {{ status.target_fan_speed_percent if status.target_fan_speed_percent is not none else 'N/A' }}
@@ -40,7 +42,8 @@
             <ul>
             {% for fan in status.actual_fan_rpms %}
                 <li><strong>{{ fan.name }}:</strong> {{ fan.rpm }} RPM</li>
-            {% else %} <li>No fan RPM data currently available.</li>
+            {% else %}
+                <li>No fan RPM data currently available.</li>
             {% endfor %}
             </ul>
         {% else %}

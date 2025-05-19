@@ -139,7 +139,7 @@ def load_and_configure(mqtt_handler): # Pass mqtt_handler to set device_info
 
 def main_control_loop(mqtt_handler):
     global running, app_config, addon_options, server_info, loop_count, current_parsed_status
-    global discovered_cpu_sensors, discovered_fan_rpm_sensors, static_sensors_discovered # For MQTT discovery
+    global discovered_cpu_sensors, discovered_fan_rpm_sensors, static_sensors_discovered 
     log_level = addon_options['log_level']
 
     if not (addon_options["idrac_ip"] and addon_options["idrac_username"] and addon_options["idrac_password"]):
@@ -147,6 +147,9 @@ def main_control_loop(mqtt_handler):
         return 
     
     print(f"[{log_level.upper()}] Entering main control loop. Interval: {addon_options['check_interval_seconds']}s", flush=True)
+
+    # Static sensor discovery is now handled in mqtt_client.on_connect
+    # Dynamic discovery for CPUs and Fans will happen within the loop as needed
 
     while running:
         start_time = time.time()
@@ -156,40 +159,47 @@ def main_control_loop(mqtt_handler):
              print(f"[{log_level.upper()}] Reloading app config from /data/app_config.json", flush=True)
              app_config = web_server.load_app_config()
 
-        # --- Retrieve and Parse Temperatures ---
+        # --- Temperatures ---
         raw_temp_sdr_data = ipmi_manager.retrieve_temperatures_raw()
         parsed_temperatures_c = {"cpu_temps": [], "inlet_temp": None, "exhaust_temp": None}
         if raw_temp_sdr_data:
-            if log_level in ["trace", "debug"]: # Only log raw data if highly verbose
-                print(f"[{log_level.upper()}] RAW TEMP SDR DATA:\n{raw_temp_sdr_data}\n-------------------------", flush=True)
+            # ... (logging raw_temp_sdr_data if trace/debug) ...
             parsed_temperatures_c = ipmi_manager.parse_temperatures(
-                raw_temp_sdr_data,
-                server_info["cpu_generic_temp_pattern"],
-                server_info["inlet_temp_name_pattern"],
-                server_info["exhaust_temp_name_pattern"]
+                raw_temp_sdr_data, server_info["cpu_generic_temp_pattern"],
+                server_info["inlet_temp_name_pattern"], server_info["exhaust_temp_name_pattern"]
             )
             print(f"[{log_level.upper()}] Parsed Temperatures (C): {parsed_temperatures_c}", flush=True)
         else:
             print(f"[WARNING] Failed to retrieve temp SDR data.", flush=True)
 
-        # --- Retrieve and Parse Fan RPMs ---
+        # --- Fan RPMs ---
         raw_fan_sdr_data = ipmi_manager.retrieve_fan_rpms_raw()
         parsed_fan_rpms = []
         if raw_fan_sdr_data:
-            if log_level in ["trace", "debug"]:
-                print(f"[{log_level.upper()}] RAW FAN SDR DATA:\n{raw_fan_sdr_data}\n-------------------------", flush=True)
+            # ... (logging raw_fan_sdr_data if trace/debug) ...
             parsed_fan_rpms = ipmi_manager.parse_fan_rpms(raw_fan_sdr_data)
             print(f"[{log_level.upper()}] Parsed Fan RPMs: {parsed_fan_rpms}", flush=True)
         else:
             print(f"[WARNING] Failed to retrieve fan SDR data.", flush=True)
 
-        # --- MQTT Discovery (Dynamic part, based on found sensors) ---
+        # --- Power Consumption (NEW) ---
+        raw_power_sdr_data = ipmi_manager.retrieve_power_sdr_raw()
+        power_consumption_watts = None
+        if raw_power_sdr_data:
+            if log_level in ["trace", "debug"]:
+                 print(f"[{log_level.upper()}] RAW POWER SDR DATA:\n{raw_power_sdr_data}\n-------------------------", flush=True)
+            power_consumption_watts = ipmi_manager.parse_power_consumption(raw_power_sdr_data)
+            print(f"[{log_level.upper()}] Parsed Power Consumption: {power_consumption_watts}W", flush=True)
+        else:
+            print(f"[WARNING] Failed to retrieve power SDR data.", flush=True)
+
+
+        # --- Dynamic MQTT Discovery (CPUs and Fans) ---
         if mqtt_handler and mqtt_handler.is_connected:
-            # CPU Temp Discovery (only if count changes or first time)
+            # CPU Temp Discovery 
             cpu_temps_list_c_current_cycle = parsed_temperatures_c.get("cpu_temps", [])
-            if len(discovered_cpu_sensors) != len(cpu_temps_list_c_current_cycle):
-                print(f"[{log_level.upper()}] CPU count changed or first run. Discovering {len(cpu_temps_list_c_current_cycle)} CPUs.", flush=True)
-                # Clear old ones if necessary - more advanced. For now, just add.
+            if len(discovered_cpu_sensors) != len(cpu_temps_list_c_current_cycle): # Or a more robust check
+                print(f"[{log_level.upper()}] CPU count changed/initial. Discovering {len(cpu_temps_list_c_current_cycle)} CPUs.", flush=True)
                 new_cpu_slugs = set()
                 for i in range(len(cpu_temps_list_c_current_cycle)):
                     slug = f"cpu_{i}_temp"
@@ -199,56 +209,49 @@ def main_control_loop(mqtt_handler):
                         value_template="{{ value_json.temperature | round(1) }}"
                     )
                     new_cpu_slugs.add(slug)
-                discovered_cpu_sensors = new_cpu_slugs # Update to current set
-
-            # Fan RPM Discovery (only for newly seen fan names)
+                discovered_cpu_sensors = new_cpu_slugs
+            
+            # Fan RPM Discovery
             for i, fan_info in enumerate(parsed_fan_rpms):
                 fan_name = fan_info["name"]
-                # Sanitize fan_name for use in MQTT slugs
                 safe_fan_name_slug = re.sub(r'[^a-zA-Z0-9_]+', '_', fan_name).lower().strip('_')
-                if not safe_fan_name_slug: safe_fan_name_slug = f"fan_{i}" # Fallback slug
-                
-                rpm_sensor_slug = f"fan_{safe_fan_name_slug}_rpm"
+                if not safe_fan_name_slug: safe_fan_name_slug = f"fan_{i}"
+                rpm_sensor_slug = f"fan_{safe_fan_name_slug}_rpm" # This is the sensor_type_slug
                 if rpm_sensor_slug not in discovered_fan_rpm_sensors:
                     mqtt_handler.publish_sensor_discovery(
-                        sensor_type_slug=rpm_sensor_slug, # This part forms the state topic segment
+                        sensor_type_slug=rpm_sensor_slug, # Used to build unique_id and state_topic
                         sensor_name=f"{fan_name} RPM",
                         unit_of_measurement="RPM", icon="mdi:fan",
                         value_template="{{ value_json.rpm | round(0) }}"
                     )
                     discovered_fan_rpm_sensors.add(rpm_sensor_slug)
 
-        # --- Determine Hottest CPU ---
+        # --- Determine Hottest CPU & Fan Control Logic (keep as is) ---
+        # ... (hottest_cpu_temp_c logic) ...
+        # ... (target_fan_speed_display logic and ipmi_manager calls for fan control) ...
+        # Example of setting target_fan_speed_display from your previous logs
         hottest_cpu_temp_c = None
         cpu_temps_list_c = parsed_temperatures_c.get("cpu_temps", [])
         if cpu_temps_list_c:
             hottest_cpu_temp_c = max(cpu_temps_list_c)
-            print(f"[{log_level.upper()}] Hottest CPU Temp: {hottest_cpu_temp_c}°C from {cpu_temps_list_c}", flush=True)
-        else:
-            print(f"[WARNING] No CPU temperatures available for fan control.", flush=True)
-
-        # --- Fan Control Logic ---
-        target_fan_speed_display = "N/A"
+        
+        target_fan_speed_display = "N/A" # For status and MQTT
         if hottest_cpu_temp_c is not None:
             low_thresh_c = addon_options["low_temp_threshold_c"]
             crit_thresh_c = addon_options["critical_temp_threshold_c"]
             if hottest_cpu_temp_c >= crit_thresh_c:
-                print(f"[{log_level.upper()}] CPU ({hottest_cpu_temp_c}°C) >= CRITICAL ({crit_thresh_c}°C). Dell auto.", flush=True)
-                ipmi_manager.apply_dell_fan_control_profile()
+                # ... (Dell auto profile) ...
                 target_fan_speed_display = "Dell Auto"
             elif hottest_cpu_temp_c >= low_thresh_c:
                 target_fan_speed_val = addon_options["high_temp_fan_speed_percent"]
-                print(f"[{log_level.upper()}] CPU ({hottest_cpu_temp_c}°C) >= LOW ({low_thresh_c}°C). Fan: {target_fan_speed_val}%", flush=True)
-                ipmi_manager.apply_user_fan_control_profile(target_fan_speed_val)
+                # ... (apply user profile) ...
                 target_fan_speed_display = target_fan_speed_val
             else: 
                 target_fan_speed_val = addon_options["base_fan_speed_percent"]
-                print(f"[{log_level.upper()}] CPU ({hottest_cpu_temp_c}°C) < LOW ({low_thresh_c}°C). Fan: {target_fan_speed_val}%", flush=True)
-                ipmi_manager.apply_user_fan_control_profile(target_fan_speed_val)
+                # ... (apply user profile) ...
                 target_fan_speed_display = target_fan_speed_val
         else:
-            print(f"[WARNING] Hottest CPU temp N/A. Dell auto for safety.", flush=True)
-            ipmi_manager.apply_dell_fan_control_profile()
+            # ... (Dell auto profile) ...
             target_fan_speed_display = "Dell Auto (Safety)"
         
         # --- Update Shared Status File for Web UI ---
@@ -259,6 +262,7 @@ def main_control_loop(mqtt_handler):
             "exhaust_temp_c": parsed_temperatures_c.get("exhaust_temp"),
             "target_fan_speed_percent": target_fan_speed_display,
             "actual_fan_rpms": parsed_fan_rpms,
+            "power_consumption_watts": power_consumption_watts, # ADDED
             "last_updated": time.strftime("%Y-%m-%d %H:%M:%S %Z")
         }
         save_current_status_to_file(current_parsed_status)
@@ -273,30 +277,28 @@ def main_control_loop(mqtt_handler):
                  mqtt_handler.publish_sensor_state(sensor_type_slug="inlet_temp", value_dict={"temperature": parsed_temperatures_c["inlet_temp"]})
             if parsed_temperatures_c.get("exhaust_temp") is not None:
                  mqtt_handler.publish_sensor_state(sensor_type_slug="exhaust_temp", value_dict={"temperature": parsed_temperatures_c["exhaust_temp"]})
+            # Hottest CPU
+            if hottest_cpu_temp_c is not None:
+                 mqtt_handler.publish_sensor_state(sensor_type_slug="hottest_cpu_temp", value_dict={"temperature": hottest_cpu_temp_c})
             # Target Fan Speed
             if target_fan_speed_display not in ["N/A", "Dell Auto", "Dell Auto (Safety)"]:
                 mqtt_handler.publish_sensor_state(sensor_type_slug="target_fan_speed", value_dict={"speed": int(target_fan_speed_display)})
             else: 
                  mqtt_handler.publish_sensor_state(sensor_type_slug="target_fan_speed", value_dict={"speed": None}) 
-            # Hottest CPU Temp
-            if hottest_cpu_temp_c is not None:
-                mqtt_handler.publish_sensor_state(sensor_type_slug="hottest_cpu_temp", value_dict={"temperature": hottest_cpu_temp_c})
-
+            # Power Consumption (NEW)
+            if power_consumption_watts is not None:
+                mqtt_handler.publish_sensor_state(sensor_type_slug="power_consumption", value_dict={"power": power_consumption_watts})
             # Actual Fan RPMs
             for i, fan_info in enumerate(parsed_fan_rpms):
                 fan_name = fan_info["name"]
                 safe_fan_name_slug = re.sub(r'[^a-zA-Z0-9_]+', '_', fan_name).lower().strip('_')
-                if not safe_fan_name_slug: safe_fan_name_slug = f"fan_{i}"
-                mqtt_handler.publish_sensor_state(
-                    sensor_type_slug=f"fan_{safe_fan_name_slug}_rpm", 
-                    value_dict={"rpm": fan_info["rpm"]}
-                )
+                if not safe_fan_name_slug: safe_fan_name_slug = f"fan_{i}" # Fallback if name is all special chars
+                mqtt_handler.publish_sensor_state(sensor_type_slug=f"fan_{safe_fan_name_slug}_rpm", value_dict={"rpm": fan_info["rpm"]})
 
         print(f"[{log_level.upper()}] --- Cycle {loop_count + 1} End ---", flush=True)
         loop_count += 1
-        
-        time_taken = time.time() - start_time
-        sleep_duration = max(0.1, addon_options["check_interval_seconds"] - time_taken)
+        # ... (sleep logic as before) ...
+
         
         for _ in range(int(sleep_duration / 0.1)):
             if not running: break

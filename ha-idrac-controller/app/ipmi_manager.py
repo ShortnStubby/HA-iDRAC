@@ -219,3 +219,56 @@ def parse_fan_rpms(sdr_data):
             
     if not fans: _log("info", "No fan RPMs found or parsed.")
     return fans
+def retrieve_power_sdr_raw():
+    _log("debug", "Retrieving raw power/current SDR data...")
+    sdr_output = _run_ipmi_command(["sdr", "type", "current"], is_raw_command=False, timeout=10)
+    if sdr_output:
+        _log("debug", "Successfully retrieved SDR power/current data.")
+    else:
+        _log("warning", "Failed to retrieve SDR power/current data.")
+    return sdr_output
+
+def parse_power_consumption(sdr_data):
+    """
+    Parses 'ipmitool sdr type current' output for Power Consumption in Watts.
+    Returns the power consumption as an integer, or None if not found.
+    """
+    power_watts = None
+    if not sdr_data:
+        _log("warning", "SDR data is empty for power consumption parsing.")
+        return None
+
+    # Example line: Pwr Consumption  | 77h | ok  |  7.1 | 196 Watts
+    # Regex to find the line starting with "Pwr Consumption" (case insensitive for "Pwr")
+    # and capture the numeric value before "Watts".
+    # Group 1: The sensor name part (e.g., "Pwr Consumption")
+    # Group 2: The numeric value (e.g., "196")
+    power_line_regex = re.compile(
+        r"^(Pwr Consumption.*?)\s*\|\s*[\da-fA-F]+h\s*\|\s*(?:ok|ns|nr|cr|u|\[Unknown\])\s*.*?\|\s*([\d\.]+)\s*Watts",
+        re.IGNORECASE
+    )
+    
+    _log("debug", "Parsing SDR lines for power consumption...")
+    lines = sdr_data.splitlines()
+
+    for i, line in enumerate(lines):
+        line_content = line.strip()
+        _log("trace", f"Processing Power Line {i+1}: '{line_content}'")
+        match_power = power_line_regex.match(line_content)
+        if match_power:
+            sensor_name = match_power.group(1).strip()
+            power_val_str = match_power.group(2)
+            _log("trace", f"  Line matched power_line_regex. Sensor: '{sensor_name}', ValueStr: '{power_val_str}'")
+            try:
+                power_watts = int(float(power_val_str))
+                _log("debug", f"  MATCHED POWER: '{sensor_name}' as {power_watts} Watts")
+                break # Found what we need, no need to parse other "Current" sensors for this function
+            except (ValueError, IndexError) as e:
+                _log("warning", f"  Could not parse numeric power value ('{power_val_str}') from: {line_content}. Error: {e}")
+        else:
+            _log("trace", f"  Line did not match power_line_regex: {line_content}")
+            
+    if power_watts is None:
+        _log("warning", "Power Consumption sensor (Watts) not found in SDR data.")
+    
+    return power_watts
