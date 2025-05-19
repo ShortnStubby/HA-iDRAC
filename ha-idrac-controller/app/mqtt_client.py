@@ -113,22 +113,30 @@ class MqttClient:
             self._log("warning", f"Not connected. Cannot publish to {topic}.")
         return False
 
-    def publish_sensor_discovery(self, sensor_type_slug, sensor_name, device_class=None, unit_of_measurement=None, icon=None, value_template=None, entity_category=None, unique_id_suffix=None):
+    def publish_sensor_discovery(self, sensor_type_slug, sensor_name, 
+                                 device_class=None, unit_of_measurement=None, 
+                                 icon=None, value_template=None, 
+                                 entity_category=None, unique_id_suffix=None,
+                                 state_class=None): # <<< ADD state_class=None HERE
         if not self.device_info_dict:
             self._log("warning", f"Device info not set. Cannot publish discovery for {sensor_name}.")
             return
 
-        # Construct a base unique_id from the device identifier and the specific sensor slug
         base_unique_id = f"{self.device_info_dict['identifiers'][0]}_{sensor_type_slug}"
-        if unique_id_suffix: # Append suffix if provided (e.g. for indexed sensors like fans)
+        if unique_id_suffix: 
             base_unique_id = f"{base_unique_id}_{unique_id_suffix}"
 
-        config_topic = f"homeassistant/sensor/{self.device_info_dict['identifiers'][0]}/{sensor_type_slug}{(unique_id_suffix if unique_id_suffix else '')}/config"
-        state_topic_base = f"ha_idrac_controller/sensor/{self.device_info_dict['identifiers'][0]}"
+        # Use a consistent node_id for all sensors of this device to group them under the device in MQTT integration
+        node_id_for_topic = self.device_info_dict['identifiers'][0] 
+        # Sanitize slug further if needed, but usually identifier is okay
+        config_topic_slug_part = f"{sensor_type_slug}{(unique_id_suffix if unique_id_suffix else '')}"
+        
+        config_topic = f"homeassistant/sensor/{node_id_for_topic}/{config_topic_slug_part}/config"
+        state_topic_base = f"ha_idrac_controller/sensor/{node_id_for_topic}" # Base for all sensor states of this device
         
         payload = {
-            "name": f"{sensor_name}", # Full name, device name will be prefixed by HA
-            "state_topic": f"{state_topic_base}/{sensor_type_slug}{(unique_id_suffix if unique_id_suffix else '')}/state",
+            "name": f"{sensor_name}", 
+            "state_topic": f"{state_topic_base}/{config_topic_slug_part}/state",
             "unique_id": base_unique_id,
             "device": self.device_info_dict,
             "availability_topic": "ha_idrac_controller/status",
@@ -140,9 +148,11 @@ class MqttClient:
         if icon: payload["icon"] = icon
         if value_template: payload["value_template"] = value_template
         if entity_category: payload["entity_category"] = entity_category
+        if state_class: payload["state_class"] = state_class # <<< ADD THIS LINE TO INCLUDE IT IN PAYLOAD
 
         self.publish(config_topic, json.dumps(payload), retain=True)
-        self._log("debug", f"Published discovery for '{sensor_name}' (unique_id: {base_unique_id})")
+        self._log("debug", f"Published discovery for '{sensor_name}' (unique_id: {base_unique_id}) on topic {config_topic}")
+
 
 
     def publish_static_sensor_discoveries(self):
