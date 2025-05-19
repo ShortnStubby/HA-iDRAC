@@ -157,4 +157,3 @@ Please open an issue on the [GitHub repository](https://github.com/Aesgarth/HA-i
 ## License
 
 This project uses the [MIT License](LICENSE).
-(Your repository already has a `LICENSE` file. If it's not MIT, update this line accordingly.)
