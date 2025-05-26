@@ -1,0 +1,68 @@
+# HA-iDRAC/ha-idrac-controller/config.yaml
+
+name: "HA iDRAC Controller BETA"
+version: "0.1.0-dev.1" # Incremented version
+slug: "ha_idrac_controller_Development"
+description: "Control Dell iDRAC fan speeds and monitor server health in Home Assistant. Development Version. Not for production use."
+arch:
+  - "aarch64"
+  - "amd64"
+init: false
+boot: "auto"
+
+ingress: true
+ingress_port: 8099
+ingress_entry: "/"
+panel_icon: "mdi:server-network"
+panel_title: "iDRAC Control"
+panel_admin: true
+
+options:
+  # iDRAC Connection
+  idrac_ip: ""
+  idrac_username: "root"
+  idrac_password: ""           # Secret
+
+  # Fan Control Logic
+  temperature_unit: "C"        # C or F
+  base_fan_speed_percent: 20   # Default fan speed if below low_temp_threshold
+  low_temp_threshold: 45       # Temp (in selected unit) to maintain base_fan_speed
+  high_temp_fan_speed_percent: 50 # Fan speed for temps between low_temp and critical_temp
+  critical_temp_threshold: 65  # Temp (in selected unit) at which to hand control to iDRAC
+
+  # Polling and Logging
+  check_interval_seconds: 30
+  log_level: "info"
+
+  # MQTT Configuration
+  mqtt_host: "core-mosquitto"
+  mqtt_port: 1883
+  mqtt_username: ""
+  mqtt_password: ""            # Secret
+
+schema:
+  # iDRAC Connection
+  idrac_ip: "str"
+  idrac_username: "str"
+  idrac_password: "password"
+
+  # Fan Control Logic
+  temperature_unit: "list(C|F)"
+  base_fan_speed_percent: "int(0,100)"
+  low_temp_threshold: "int(0,100)"
+  high_temp_fan_speed_percent: "int(0,100)"
+  critical_temp_threshold: "int(0,100)"
+
+  # Polling and Logging
+  check_interval_seconds: "int(5,)"
+  log_level: "list(trace|debug|info|notice|warning|error|fatal)" # Added trace & notice
+
+  # MQTT Configuration
+  mqtt_host: "str"
+  mqtt_port: "port"
+  mqtt_username: "str?" # Optional
+  mqtt_password: "password?" # Optional
+
+map:
+  - "data:rw"
+hassio_role: "default"
