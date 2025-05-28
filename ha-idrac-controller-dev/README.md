@@ -7,6 +7,7 @@
 **For the stable version (if available), please refer to the main add-on list or a different repository/branch as indicated by the developer.**
 
 ---
+**Next Roadmap Goal: Multi-Server Support. This is as yet NOT working**
 
 **Control your Dell PowerEdge server's fan speeds based on CPU temperature and monitor key server metrics directly from Home Assistant.**
 
