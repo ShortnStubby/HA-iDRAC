@@ -18,35 +18,30 @@ panel_title: "iDRAC Control"
 panel_admin: true
 
 options:
-  # iDRAC Connection
-  idrac_ip: ""
-  idrac_username: "root"
-  idrac_password: ""           # Secret
+  # Master Key for encrypting server credentials stored in /data/servers_config.json
+  master_encryption_key: ""    # Secret
 
-  # Fan Control Logic
-  temperature_unit: "C"        # C or F
-  base_fan_speed_percent: 20   # Default fan speed if below low_temp_threshold
-  low_temp_threshold: 45       # Temp (in selected unit) to maintain base_fan_speed
-  high_temp_fan_speed_percent: 50 # Fan speed for temps between low_temp and critical_temp
-  critical_temp_threshold: 65  # Temp (in selected unit) at which to hand control to iDRAC
+  # Default Fan Control Logic (can be overridden per server)
+  temperature_unit: "C"
+  base_fan_speed_percent: 20
+  low_temp_threshold: 45
+  high_temp_fan_speed_percent: 50
+  critical_temp_threshold: 65
 
   # Polling and Logging
   check_interval_seconds: 30
   log_level: "info"
 
-  # MQTT Configuration
+  # MQTT Configuration (Global for now)
   mqtt_host: "core-mosquitto"
   mqtt_port: 1883
   mqtt_username: ""
-  mqtt_password: ""            # Secret
+  mqtt_password: ""
 
 schema:
-  # iDRAC Connection
-  idrac_ip: "str"
-  idrac_username: "str"
-  idrac_password: "password"
+  master_encryption_key: "password"
 
-  # Fan Control Logic
+  # Default Fan Control Logic
   temperature_unit: "list(C|F)"
   base_fan_speed_percent: "int(0,100)"
   low_temp_threshold: "int(0,100)"
@@ -55,13 +50,13 @@ schema:
 
   # Polling and Logging
   check_interval_seconds: "int(5,)"
-  log_level: "list(trace|debug|info|notice|warning|error|fatal)" # Added trace & notice
+  log_level: "list(trace|debug|info|notice|warning|error|fatal)"
 
   # MQTT Configuration
   mqtt_host: "str"
   mqtt_port: "port"
-  mqtt_username: "str?" # Optional
-  mqtt_password: "password?" # Optional
+  mqtt_username: "str?"
+  mqtt_password: "password?"
 
 map:
   - "data:rw"

@@ -2,9 +2,10 @@
 echo "[RUN.SH] >>> Add-on execution started at $(date)"
 
 # Default values
-IDRAC_IP_DEFAULT=""
-IDRAC_USERNAME_DEFAULT="root"
-IDRAC_PASSWORD_DEFAULT=""
+#IDRAC_IP_DEFAULT=""
+#IDRAC_USERNAME_DEFAULT="root"
+#IDRAC_PASSWORD_DEFAULT=""
+MASTER_ENCRYPTION_KEY_DEFAULT="" 
 CHECK_INTERVAL_SECONDS_DEFAULT=60
 LOG_LEVEL_DEFAULT="info"
 TEMPERATURE_UNIT_DEFAULT="C"
@@ -20,9 +21,10 @@ MQTT_PASSWORD_DEFAULT=""
 # Read configuration from /data/options.json if it exists
 if [ -f /data/options.json ]; then
     echo "[RUN.SH] Reading configuration from /data/options.json"
-    export IDRAC_IP=$(jq -r '.idrac_ip // empty' /data/options.json)
-    export IDRAC_USERNAME=$(jq -r '.idrac_username // "'"$IDRAC_USERNAME_DEFAULT"'"' /data/options.json)
-    export IDRAC_PASSWORD=$(jq -r '.idrac_password // empty' /data/options.json)
+    export MASTER_ENCRYPTION_KEY=$(jq -r '.master_encryption_key // empty' /data/options.json)
+    #export IDRAC_IP=$(jq -r '.idrac_ip // empty' /data/options.json)
+    #export IDRAC_USERNAME=$(jq -r '.idrac_username // "'"$IDRAC_USERNAME_DEFAULT"'"' /data/options.json)
+    #export IDRAC_PASSWORD=$(jq -r '.idrac_password // empty' /data/options.json)
     export CHECK_INTERVAL_SECONDS=$(jq -r '.check_interval_seconds // "'"$CHECK_INTERVAL_SECONDS_DEFAULT"'"' /data/options.json)
     export LOG_LEVEL=$(jq -r '.log_level // "'"$LOG_LEVEL_DEFAULT"'"' /data/options.json)
 
