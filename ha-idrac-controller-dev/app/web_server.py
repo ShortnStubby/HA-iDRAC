@@ -13,18 +13,16 @@ app.secret_key = os.urandom(24)
 STATUS_FILE = None
 SERVERS_CONFIG_FILE = "/data/servers_config.json"
 status_lock = None
-config_lock = threading.Lock() # New lock for the config file
+config_lock = threading.Lock()
+global_config = {} # Will be populated by main.py
 
 # --- Helper functions for config management ---
 def load_servers_config():
     with config_lock:
-        if not os.path.exists(SERVERS_CONFIG_FILE):
-            return []
+        if not os.path.exists(SERVERS_CONFIG_FILE): return []
         try:
-            with open(SERVERS_CONFIG_FILE, 'r') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            return []
+            with open(SERVERS_CONFIG_FILE, 'r') as f: return json.load(f)
+        except (json.JSONDecodeError, IOError): return []
 
 def save_servers_config(servers):
     with config_lock:
@@ -37,15 +35,11 @@ def save_servers_config(servers):
             flash("Error: Could not write to config file.", "error")
             return False
 
-# --- Status loading for dashboard ---
 def load_all_servers_status():
     if STATUS_FILE and os.path.exists(STATUS_FILE):
         try:
-            # The status_lock is handled by the main thread writing the file
-            with open(STATUS_FILE, 'r') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError, PermissionError) as e:
-            print(f"[WEBSERVER ERROR] Could not load status from {STATUS_FILE}: {e}", flush=True)
+            with open(STATUS_FILE, 'r') as f: return json.load(f)
+        except (json.JSONDecodeError, IOError): pass
     return []
 
 # --- Routes ---
@@ -58,14 +52,12 @@ def index():
 @app.route('/servers')
 def manage_servers():
     servers = load_servers_config()
-    return render_template('servers.html', servers=servers)
+    return render_template('servers.html', servers=servers, defaults=global_config)
 
 @app.route('/servers/add', methods=['POST'])
 def add_server():
     servers = load_servers_config()
     new_alias = request.form.get('alias')
-
-    # Check if alias already exists
     if any(s['alias'] == new_alias for s in servers):
         flash(f"Server alias '{new_alias}' already exists.", "error")
         return redirect(url_for('manage_servers'))
@@ -74,15 +66,45 @@ def add_server():
         "alias": new_alias,
         "idrac_ip": request.form.get('idrac_ip'),
         "idrac_username": request.form.get('idrac_username'),
-        # In a real implementation, this would be encrypted before saving.
         "idrac_password": request.form.get('idrac_password'),
         "enabled": True,
-        "base_fan_speed_percent": int(request.form.get('base_fan_speed_percent', 20)),
-        "low_temp_threshold": int(request.form.get('low_temp_threshold', 45)),
-        "high_temp_fan_speed_percent": int(request.form.get('high_temp_fan_speed_percent', 50)),
-        "critical_temp_threshold": int(request.form.get('critical_temp_threshold', 65))
+        "base_fan_speed_percent": int(request.form.get('base_fan_speed_percent')),
+        "low_temp_threshold": int(request.form.get('low_temp_threshold')),
+        "high_temp_fan_speed_percent": int(request.form.get('high_temp_fan_speed_percent')),
+        "critical_temp_threshold": int(request.form.get('critical_temp_threshold'))
     }
     servers.append(new_server)
+    save_servers_config(servers)
+    return redirect(url_for('manage_servers'))
+    
+@app.route('/servers/edit/<alias>')
+def edit_server_form(alias):
+    servers = load_servers_config()
+    server_to_edit = next((s for s in servers if s['alias'] == alias), None)
+    if server_to_edit:
+        return render_template('edit_server.html', server=server_to_edit)
+    flash(f"Server '{alias}' not found.", "error")
+    return redirect(url_for('manage_servers'))
+
+@app.route('/servers/update/<alias>', methods=['POST'])
+def update_server(alias):
+    servers = load_servers_config()
+    server_to_update = next((s for s in servers if s['alias'] == alias), None)
+    if not server_to_update:
+        flash(f"Server '{alias}' not found.", "error")
+        return redirect(url_for('manage_servers'))
+
+    server_to_update['idrac_ip'] = request.form.get('idrac_ip')
+    server_to_update['idrac_username'] = request.form.get('idrac_username')
+    new_password = request.form.get('idrac_password')
+    if new_password:
+        server_to_update['idrac_password'] = new_password
+    server_to_update['enabled'] = request.form.get('enabled') == 'true'
+    server_to_update['base_fan_speed_percent'] = int(request.form.get('base_fan_speed_percent'))
+    server_to_update['low_temp_threshold'] = int(request.form.get('low_temp_threshold'))
+    server_to_update['high_temp_fan_speed_percent'] = int(request.form.get('high_temp_fan_speed_percent'))
+    server_to_update['critical_temp_threshold'] = int(request.form.get('critical_temp_threshold'))
+    
     save_servers_config(servers)
     return redirect(url_for('manage_servers'))
 
@@ -90,12 +112,10 @@ def add_server():
 def delete_server(alias):
     servers = load_servers_config()
     servers_to_keep = [s for s in servers if s['alias'] != alias]
-    
-    if len(servers_to_keep) == len(servers):
-        flash(f"Server with alias '{alias}' not found.", "error")
-    else:
+    if len(servers_to_keep) < len(servers):
         save_servers_config(servers_to_keep)
-        
+    else:
+        flash(f"Server '{alias}' not found.", "error")
     return redirect(url_for('manage_servers'))
 
 def run_web_server(port, status_file_path, lock):
@@ -104,18 +124,4 @@ def run_web_server(port, status_file_path, lock):
     status_lock = lock
     
     host = '0.0.0.0'
-    print(f"[WEBSERVER INFO] Starting Flask web server on {host}:{port}", flush=True)
-
-    # *** NEW DEBUGGING CODE ***
-    # This will print all routes Flask knows about to the add-on log.
-    with app.app_context():
-        rules = []
-        for rule in app.url_map.iter_rules():
-            rules.append(f"Endpoint: {rule.endpoint}, Path: {rule.rule}, Methods: {','.join(rule.methods)}")
-        print("[WEBSERVER INFO] Registered routes:\n" + "\n".join(sorted(rules)), flush=True)
-    # *** END DEBUGGING CODE ***
-
-    try:
-        app.run(host=host, port=port, debug=False, use_reloader=False)
-    except Exception as e:
-        print(f"[WEBSERVER ERROR] Web server failed to start: {e}", flush=True)
+    app.run(host=host, port=port, debug=False, use_reloader=False)

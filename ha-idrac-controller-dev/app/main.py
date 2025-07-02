@@ -52,12 +52,10 @@ class ServerWorker:
     def _initialize(self):
         self._log("info", "Initializing server worker...")
         
-        # Get server model info
         model_data = self.ipmi.get_server_model_info()
         if model_data:
             self.server_info.update(model_data)
         
-        # Configure MQTT
         self.mqtt.configure_broker(
             self.global_opts["mqtt_host"], self.global_opts["mqtt_port"],
             self.global_opts["mqtt_username"], self.global_opts["mqtt_password"],
@@ -70,7 +68,6 @@ class ServerWorker:
             ip_address=self.config.get("idrac_ip")
         )
         self.mqtt.connect()
-        # Wait a moment for connection to establish
         time.sleep(2)
         return True
 
@@ -84,9 +81,8 @@ class ServerWorker:
             start_time = time.time()
             
             try:
-                self._log("info", f"--- Cycle {loop_count + 1} Start ---")
+                self._log("debug", f"--- Cycle {loop_count + 1} Start ---")
                 
-                # --- Sensor Data Retrieval ---
                 raw_temp_data = self.ipmi.retrieve_temperatures_raw()
                 temps = self.ipmi.parse_temperatures(raw_temp_data, r"Temp", r"Inlet Temp", r"Exhaust Temp")
                 
@@ -96,17 +92,14 @@ class ServerWorker:
                 raw_power_data = self.ipmi.retrieve_power_sdr_raw()
                 power = self.ipmi.parse_power_consumption(raw_power_data)
 
-                # --- Fan Control Logic ---
                 hottest_cpu = max(temps['cpu_temps']) if temps['cpu_temps'] else None
                 target_fan_speed = "Dell Auto"
 
                 if hottest_cpu is not None:
-                    # Use server-specific thresholds, fall back to global defaults from addon_config
-                    low_thresh = self.config.get('low_temp_threshold', self.global_opts.get('low_temp_threshold', 45))
-                    crit_thresh = self.config.get('critical_temp_threshold', self.global_opts.get('critical_temp_threshold', 65))
-                    high_fan = self.config.get('high_temp_fan_speed_percent', self.global_opts.get('high_temp_fan_speed_percent', 50))
-                    base_fan = self.config.get('base_fan_speed_percent', self.global_opts.get('base_fan_speed_percent', 20))
-
+                    low_thresh = self.config.get('low_temp_threshold', self.global_opts['low_temp_threshold'])
+                    crit_thresh = self.config.get('critical_temp_threshold', self.global_opts['critical_temp_threshold'])
+                    high_fan = self.config.get('high_temp_fan_speed_percent', self.global_opts['high_temp_fan_speed_percent'])
+                    base_fan = self.config.get('base_fan_speed_percent', self.global_opts['base_fan_speed_percent'])
 
                     if hottest_cpu >= crit_thresh:
                         self.ipmi.apply_dell_fan_control_profile()
@@ -121,7 +114,6 @@ class ServerWorker:
                     self._log("warning", "No CPU temperature available. Reverting to Dell auto control for safety.")
                     self.ipmi.apply_dell_fan_control_profile()
 
-                # --- Update Shared Status ---
                 status_data = {
                     "alias": self.alias, "ip": self.config['idrac_ip'],
                     "cpu_temps_c": temps['cpu_temps'], "hottest_cpu_temp_c": hottest_cpu,
@@ -133,61 +125,51 @@ class ServerWorker:
                 with status_lock:
                     ALL_SERVERS_STATUS[self.alias] = status_data
                 
-                # --- MQTT Publishing ---
                 self._publish_mqtt_data(status_data)
 
             except Exception as e:
                 self._log("error", f"An error occurred in control loop: {e}")
 
-            # --- Sleep ---
             time_taken = time.time() - start_time
             sleep_duration = max(0.1, self.global_opts["check_interval_seconds"] - time_taken)
-            self._log("info", f"Cycle took {time_taken:.2f}s. Sleeping for {sleep_duration:.2f}s.")
+            self._log("debug", f"Cycle took {time_taken:.2f}s. Sleeping for {sleep_duration:.2f}s.")
             time.sleep(sleep_duration)
             loop_count += 1
 
         self.cleanup()
 
     def _publish_mqtt_data(self, status):
-        # Static sensors (publish discovery once)
-        static_sensors = {
+        # Publish discovery messages if needed
+        all_sensors = {
             "hottest_cpu_temp": {"name": "Hottest CPU Temp", "device_class": "temperature", "unit": "°C"},
             "inlet_temp": {"name": "Inlet Temperature", "device_class": "temperature", "unit": "°C"},
             "exhaust_temp": {"name": "Exhaust Temperature", "device_class": "temperature", "unit": "°C"},
             "power": {"name": "Power Consumption", "device_class": "power", "unit": "W", "state_class": "measurement"},
             "target_fan_speed": {"name": "Target Fan Speed", "unit": "%", "icon": "mdi:fan-chevron-up"}
         }
-        for slug, desc in static_sensors.items():
+        for i, temp in enumerate(status['cpu_temps_c']):
+            all_sensors[f"cpu_{i}_temp"] = {"name": f"CPU {i} Temperature", "device_class": "temperature", "unit": "°C"}
+        for fan in status['actual_fan_rpms']:
+            slug = f"fan_{re.sub(r'[^a-zA-Z0-9_]+', '', fan['name']).lower()}_rpm"
+            all_sensors[slug] = {"name": f"{fan['name']} RPM", "unit": "RPM", "icon": "mdi:fan"}
+
+        for slug, desc in all_sensors.items():
             if slug not in self.discovered_sensors:
                 self.mqtt.publish_sensor_discovery(slug, desc['name'], desc.get('device_class'), desc.get('unit'), desc.get('icon'), None, desc.get('state_class'))
                 self.discovered_sensors.add(slug)
 
-        # Dynamic sensors (CPU and Fans)
-        for i, temp in enumerate(status['cpu_temps_c']):
-            slug = f"cpu_{i}_temp"
-            if slug not in self.discovered_sensors:
-                self.mqtt.publish_sensor_discovery(slug, f"CPU {i} Temperature", "temperature", "°C")
-                self.discovered_sensors.add(slug)
-            self.mqtt.publish_sensor_state(slug, {"temperature": temp})
-
-        for fan in status['actual_fan_rpms']:
-            slug = f"fan_{re.sub(r'[^a-zA-Z0-9_]+', '', fan['name']).lower()}_rpm"
-            if slug not in self.discovered_sensors:
-                self.mqtt.publish_sensor_discovery(slug, f"{fan['name']} RPM", None, "RPM", "mdi:fan")
-                self.discovered_sensors.add(slug)
-            self.mqtt.publish_sensor_state(slug, {"rpm": fan['rpm']})
-        
-        # Publish states for static sensors
+        # Publish all states
         self.mqtt.publish_sensor_state("hottest_cpu_temp", {"temperature": status['hottest_cpu_temp_c']})
         self.mqtt.publish_sensor_state("inlet_temp", {"temperature": status['inlet_temp_c']})
         self.mqtt.publish_sensor_state("exhaust_temp", {"temperature": status['exhaust_temp_c']})
         self.mqtt.publish_sensor_state("power", {"power": status['power_consumption_watts']})
-        
         target_speed_val = status['target_fan_speed_percent']
-        if isinstance(target_speed_val, str):
-             target_speed_val = None # Publish null if it's a string like "Dell Auto"
-        self.mqtt.publish_sensor_state("target_fan_speed", {"speed": target_speed_val})
-
+        self.mqtt.publish_sensor_state("target_fan_speed", {"speed": None if isinstance(target_speed_val, str) else target_speed_val})
+        for i, temp in enumerate(status['cpu_temps_c']):
+            self.mqtt.publish_sensor_state(f"cpu_{i}_temp", {"temperature": temp})
+        for fan in status['actual_fan_rpms']:
+            slug = f"fan_{re.sub(r'[^a-zA-Z0-9_]+', '', fan['name']).lower()}_rpm"
+            self.mqtt.publish_sensor_state(slug, {"rpm": fan['rpm']})
 
     def cleanup(self):
         self._log("info", "Worker shutting down. Reverting to Dell auto fans.")
@@ -203,7 +185,6 @@ class ServerWorker:
 if __name__ == "__main__":
     print("[MAIN] ===== HA iDRAC Multi-Server Controller Starting =====", flush=True)
 
-    # Load global HA add-on options from environment
     global_options = {
         "check_interval_seconds": int(os.getenv("CHECK_INTERVAL_SECONDS", "60")),
         "log_level": os.getenv("LOG_LEVEL", "info").lower(),
@@ -212,69 +193,46 @@ if __name__ == "__main__":
         "mqtt_username": os.getenv("MQTT_USERNAME", ""),
         "mqtt_password": os.getenv("MQTT_PASSWORD", ""),
         "master_encryption_key": os.getenv("MASTER_ENCRYPTION_KEY"),
-        # Also load default fan thresholds from addon config
         "base_fan_speed_percent": int(os.getenv("BASE_FAN_SPEED_PERCENT", "20")),
         "low_temp_threshold": int(os.getenv("LOW_TEMP_THRESHOLD", "45")),
         "high_temp_fan_speed_percent": int(os.getenv("HIGH_TEMP_FAN_SPEED_PERCENT", "50")),
         "critical_temp_threshold": int(os.getenv("CRITICAL_TEMP_THRESHOLD", "65")),
     }
 
-    # Load servers config, creating it if it doesn't exist
     SERVERS_CONFIG_FILE = "/data/servers_config.json"
     servers_configs_list = []
     if os.path.exists(SERVERS_CONFIG_FILE):
-        print(f"[MAIN] Loading server configurations from {SERVERS_CONFIG_FILE}", flush=True)
         with open(SERVERS_CONFIG_FILE, 'r') as f:
-            try:
-                servers_configs_list = json.load(f)
-            except json.JSONDecodeError:
-                print(f"[MAIN] WARNING: Could not decode {SERVERS_CONFIG_FILE}. Starting with an empty server list.", flush=True)
-                servers_configs_list = []
+            try: servers_configs_list = json.load(f)
+            except json.JSONDecodeError: servers_configs_list = []
     else:
-        print(f"[MAIN] INFO: {SERVERS_CONFIG_FILE} not found. Creating a new empty config file.", flush=True)
-        with open(SERVERS_CONFIG_FILE, 'w') as f:
-            json.dump([], f) # Create the file with an empty list
-        servers_configs_list = []
+        with open(SERVERS_CONFIG_FILE, 'w') as f: json.dump([], f)
 
-
-    # Start the web server in a background thread
+    web_server.global_config = global_options
     web_server_port = int(os.getenv("INGRESS_PORT", 8099))
     web_thread = threading.Thread(target=web_server.run_web_server, args=(web_server_port, STATUS_FILE, status_lock), daemon=True)
     web_thread.start()
-    print(f"[MAIN] Web server started on port {web_server_port}", flush=True)
 
-    # Create and start a worker thread for each enabled server
     worker_instances = []
-    for server_conf_raw in servers_configs_list:
-        if not server_conf_raw.get("enabled", False):
-            print(f"[MAIN] Server '{server_conf_raw.get('alias')}' is disabled, skipping.", flush=True)
-            continue
-        
-        worker = ServerWorker(server_conf_raw, global_options)
-        worker_instances.append(worker)
-        thread = threading.Thread(target=worker.run, daemon=True)
-        threads.append(thread)
-        thread.start()
-        
-    # Keep the main thread alive to catch signals and update status file
+    for server_conf in servers_configs_list:
+        if server_conf.get("enabled", False):
+            worker = ServerWorker(server_conf, global_options)
+            worker_instances.append(worker)
+            thread = threading.Thread(target=worker.run, daemon=True)
+            threads.append(thread)
+            thread.start()
+
     try:
         while running:
             with status_lock:
-                # Ensure the status file exists and is writable
                 try:
-                    with open(STATUS_FILE, 'w') as f:
-                        json.dump(list(ALL_SERVERS_STATUS.values()), f, indent=4)
-                except IOError as e:
-                    print(f"[MAIN] ERROR: Could not write to status file {STATUS_FILE}: {e}", flush=True)
+                    with open(STATUS_FILE, 'w') as f: json.dump(list(ALL_SERVERS_STATUS.values()), f, indent=4)
+                except IOError as e: print(f"[MAIN] ERROR: Could not write to status file {STATUS_FILE}: {e}", flush=True)
             time.sleep(2)
     except KeyboardInterrupt:
         graceful_shutdown(None, None)
 
-    # Wait for all threads to finish
     print("[MAIN] Waiting for all server threads to terminate...", flush=True)
-    for worker in worker_instances:
-        worker.stop()
-    for thread in threads:
-        thread.join(timeout=10)
-
+    for worker in worker_instances: worker.stop()
+    for thread in threads: thread.join(timeout=10)
     print("[MAIN] ===== HA iDRAC Controller Stopped =====", flush=True)

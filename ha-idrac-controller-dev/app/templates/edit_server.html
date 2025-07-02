@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Edit {{ server.alias }}</title>
+    <link rel="stylesheet" href="../static/style.css">
+</head>
+<body>
+    <div class="main-container">
+        <h1>Edit Server: {{ server.alias }}</h1>
+        <p><a href="../servers">&laquo; Back to Server List</a></p>
+
+        <div class="container">
+            <form action="../update/{{ server.alias }}" method="POST" class="form-grid">
+                <div class="form-group">
+                    <label for="idrac_ip">iDRAC IP Address</label>
+                    <input type="text" id="idrac_ip" name="idrac_ip" value="{{ server.idrac_ip }}" required>
+                </div>
+                <div class="form-group">
+                    <label for="idrac_username">Username</label>
+                    <input type="text" id="idrac_username" name="idrac_username" value="{{ server.idrac_username }}" required>
+                </div>
+                <div class="form-group">
+                    <label for="idrac_password">New Password</label>
+                    <input type="password" id="idrac_password" name="idrac_password" placeholder="Leave blank to keep existing">
+                    <small>Password is saved as plain text in this version.</small>
+                </div>
+                <div class="form-group">
+                    <label for="enabled">Enabled</label>
+                    <select id="enabled" name="enabled">
+                        <option value="true" {% if server.enabled %}selected{% endif %}>Yes</option>
+                        <option value="false" {% if not server.enabled %}selected{% endif %}>No</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="base_fan_speed_percent">Base Fan Speed (%)</label>
+                    <input type="number" id="base_fan_speed_percent" name="base_fan_speed_percent" value="{{ server.base_fan_speed_percent }}" min="0" max="100">
+                </div>
+                <div class="form-group">
+                    <label for="low_temp_threshold">Low Temp Threshold (°C)</label>
+                    <input type="number" id="low_temp_threshold" name="low_temp_threshold" value="{{ server.low_temp_threshold }}" min="0" max="100">
+                </div>
+                <div class="form-group">
+                    <label for="high_temp_fan_speed_percent">High Temp Fan Speed (%)</label>
+                    <input type="number" id="high_temp_fan_speed_percent" name="high_temp_fan_speed_percent" value="{{ server.high_temp_fan_speed_percent }}" min="0" max="100">
+                </div>
+                 <div class="form-group">
+                    <label for="critical_temp_threshold">Critical Temp Threshold (°C)</label>
+                    <input type="number" id="critical_temp_threshold" name="critical_temp_threshold" value="{{ server.critical_temp_threshold }}" min="0" max="100">
+                </div>
+                <div class="form-actions">
+                    <button type="submit">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <style>
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1em; }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group label { margin-bottom: 0.5em; }
+        .form-group input, .form-group select { max-width: none; }
+        .form-actions { grid-column: span 2; }
+    </style>
+</body>
+</html>

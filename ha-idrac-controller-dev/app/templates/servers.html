@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Manage iDRAC Servers</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="static/style.css">
 </head>
 <body>
     <div class="main-container">
@@ -38,23 +38,22 @@
                 <div class="form-group">
                     <label for="idrac_password">Password</label>
                     <input type="password" id="idrac_password" name="idrac_password" required>
-                    <small>Password is saved as plain text in this version.</small>
                 </div>
                 <div class="form-group">
                     <label for="base_fan_speed_percent">Base Fan Speed (%)</label>
-                    <input type="number" id="base_fan_speed_percent" name="base_fan_speed_percent" value="20" min="0" max="100">
+                    <input type="number" id="base_fan_speed_percent" name="base_fan_speed_percent" value="{{ defaults.base_fan_speed_percent }}" min="0" max="100">
                 </div>
                 <div class="form-group">
                     <label for="low_temp_threshold">Low Temp Threshold (°C)</label>
-                    <input type="number" id="low_temp_threshold" name="low_temp_threshold" value="45" min="0" max="100">
+                    <input type="number" id="low_temp_threshold" name="low_temp_threshold" value="{{ defaults.low_temp_threshold }}" min="0" max="100">
                 </div>
                 <div class="form-group">
                     <label for="high_temp_fan_speed_percent">High Temp Fan Speed (%)</label>
-                    <input type="number" id="high_temp_fan_speed_percent" name="high_temp_fan_speed_percent" value="50" min="0" max="100">
+                    <input type="number" id="high_temp_fan_speed_percent" name="high_temp_fan_speed_percent" value="{{ defaults.high_temp_fan_speed_percent }}" min="0" max="100">
                 </div>
                  <div class="form-group">
                     <label for="critical_temp_threshold">Critical Temp Threshold (°C)</label>
-                    <input type="number" id="critical_temp_threshold" name="critical_temp_threshold" value="65" min="0" max="100">
+                    <input type="number" id="critical_temp_threshold" name="critical_temp_threshold" value="{{ defaults.critical_temp_threshold }}" min="0" max="100">
                 </div>
                 <div class="form-actions">
                     <button type="submit">Add Server</button>
@@ -67,6 +66,7 @@
             <table class="server-table">
                 <thead>
                     <tr>
+                        <th>Enabled</th>
                         <th>Alias</th>
                         <th>iDRAC IP</th>
                         <th>Username</th>
@@ -76,10 +76,12 @@
                 <tbody>
                     {% for server in servers %}
                     <tr>
+                        <td>{{ 'Yes' if server.enabled else 'No' }}</td>
                         <td>{{ server.alias }}</td>
                         <td>{{ server.idrac_ip }}</td>
                         <td>{{ server.idrac_username }}</td>
-                        <td>
+                        <td class="actions">
+                            <a href="servers/edit/{{ server.alias }}" class="button">Edit</a>
                             <form action="servers/delete/{{ server.alias }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this server?');">
                                 <button type="submit" class="destructive">Delete</button>
                             </form>
@@ -87,7 +89,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="4">No servers configured.</td>
+                        <td colspan="5">No servers configured.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -98,12 +100,15 @@
         .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1em; }
         .form-group { display: flex; flex-direction: column; }
         .form-group label { margin-bottom: 0.5em; }
-        .form-group input { max-width: none; }
+        .form-group input, .form-group select { max-width: none; }
         .form-actions { grid-column: span 2; }
         .server-table { width: 100%; border-collapse: collapse; }
-        .server-table th, .server-table td { padding: 12px; border-bottom: 1px solid var(--divider-color); text-align: left; }
+        .server-table th, .server-table td { padding: 12px; border-bottom: 1px solid var(--divider-color); text-align: left; vertical-align: middle; }
         .server-table th { background-color: var(--secondary-background-color); }
-        .server-table button { margin: 0; }
+        .server-table .actions { display: flex; gap: 8px; align-items: center; }
+        .server-table .button, .server-table button { text-decoration: none; padding: 6px 10px; border-radius: 4px; color: white; font-size: 0.9em; margin: 0; }
+        .server-table .button { background-color: var(--primary-color); }
+        .server-table button.destructive { background-color: var(--error-color); }
     </style>
 </body>
 </html>
