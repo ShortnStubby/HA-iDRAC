@@ -1,29 +1,30 @@
-# HA-iDRAC/ha-idrac-controller/app/mqtt_client.py
+# HA-iDRAC/ha-idrac-controller-dev/app/mqtt_client.py
 import paho.mqtt.client as mqtt
-import os
-import time
 import json
-import re # For sanitizing fan names
+import re
 
 class MqttClient:
     def __init__(self, client_id="ha_idrac_controller"):
         self.client_id = client_id
         self.client = mqtt.Client(client_id=self.client_id, protocol=mqtt.MQTTv311)
-        self.broker_address = "core-mosquitto" # Default, will be overridden by main.py
+        self.broker_address = "core-mosquitto"
         self.port = 1883
         self.username = ""
         self.password = ""
         self.is_connected = False
-        self.device_info_dict = None # This will be set by main.py after server_info is fetched
-        self.log_level = "info" # Default, can be updated from main.py
+        self.log_level = "info"
 
         self.client.on_connect = self.on_connect
         self.client.on_disconnect = self.on_disconnect
+        
+        # This will be set for each server thread individually now
+        self.base_topic = "ha_idrac_controller"
+        self.device_info_dict = None
 
     def _log(self, level, message):
         levels = {"trace": -1, "debug": 0, "info": 1, "warning": 2, "error": 3, "fatal": 4}
         if levels.get(self.log_level, levels["info"]) <= levels.get(level.lower(), levels["info"]):
-            print(f"[{level.upper()}] MQTT: {message}", flush=True)
+            print(f"[{level.upper()}] MQTT ({self.client_id}): {message}", flush=True)
 
     def configure_broker(self, host, port, username, password, log_level="info"):
         self.broker_address = host
@@ -31,42 +32,27 @@ class MqttClient:
         self.username = username
         self.password = password
         self.log_level = log_level.lower()
-        if self.username: # Only set if username is actually provided
+        if self.username:
             self.client.username_pw_set(self.username, self.password)
 
-    def set_device_info(self, manufacturer, model, ip_address):
-        sanitized_ip = ip_address.replace('.', '_') if ip_address else "default_ip"
+    def set_device_info(self, server_alias, manufacturer, model, ip_address):
+        """Sets the device info for a specific server."""
+        safe_alias = re.sub(r'[^a-zA-Z0-9_-]+', '_', server_alias)
+        self.base_topic = f"ha_idrac_controller/{safe_alias}"
         self.device_info_dict = {
-            "identifiers": [f"idrac_controller_{sanitized_ip}_device"],
-            "name": f"iDRAC Controller ({ip_address or 'N/A'})",
-            "model": model or "HA iDRAC Controller",
-            "manufacturer": manufacturer or "HA Add-on" # Changed from Aesgarth for generality
+            "identifiers": [f"idrac_controller_{safe_alias}"],
+            "name": f"iDRAC ({server_alias})",
+            "model": model or "PowerEdge Server",
+            "manufacturer": manufacturer or "DELL"
         }
-        self._log("info", f"Device info for MQTT discovery set to: {self.device_info_dict}")
-
+        self._log("info", f"Device info for MQTT discovery set for '{server_alias}'")
 
     def on_connect(self, client, userdata, flags, rc):
         if rc == 0:
             self._log("info", f"Connected successfully to broker {self.broker_address}:{self.port}")
             self.is_connected = True
-            
-            # Publish general add-on availability status sensor
-            if self.device_info_dict:
-                status_config_topic = f"homeassistant/binary_sensor/idrac_controller_{self.device_info_dict['identifiers'][0]}/status/config"
-                status_config_payload = {
-                    "name": "iDRAC Controller Connectivity",
-                    "state_topic": "ha_idrac_controller/status",
-                    "unique_id": f"idrac_controller_{self.device_info_dict['identifiers'][0]}_connectivity",
-                    "device_class": "connectivity",
-                    "payload_on": "online",
-                    "payload_off": "offline",
-                    "device": self.device_info_dict
-                }
-                self.publish(status_config_topic, json.dumps(status_config_payload), retain=True)
-            self.publish("ha_idrac_controller/status", "online", retain=True)
-
-            # Static sensor discoveries (non-CPU, non-FanRPM which are dynamic)
-            self.publish_static_sensor_discoveries()
+            # The LWT will be set for the main connection, but each device will have its own availability
+            self.publish(f"{self.base_topic}/status", "online", retain=True)
         else:
             self._log("error", f"Connection failed with code {rc}")
             self.is_connected = False
@@ -76,131 +62,62 @@ class MqttClient:
         self.is_connected = False
 
     def connect(self):
-        if not self.is_connected:
-            self._log("info", f"Attempting to connect to broker {self.broker_address}:{self.port}...")
-            try:
-                self.client.will_set("ha_idrac_controller/status", payload="offline", qos=1, retain=True)
-                self.client.connect(self.broker_address, self.port, 60)
-                self.client.loop_start() 
-            except ConnectionRefusedError:
-                self._log("error", f"Connection refused by broker {self.broker_address}:{self.port}.")
-            except OSError as e:
-                self._log("error", f"OS error connecting to broker {self.broker_address}:{self.port} - {e}")
-            except Exception as e:
-                self._log("error", f"Could not connect to broker: {e}")
+        if self.is_connected: return
+        self._log("info", f"Attempting to connect to broker {self.broker_address}...")
+        try:
+            # Set a generic will for the client, and specific availability for each device
+            self.client.will_set(f"{self.base_topic}/status", payload="offline", qos=1, retain=True)
+            self.client.connect(self.broker_address, self.port, 60)
+            self.client.loop_start()
+        except Exception as e:
+            self._log("error", f"Could not connect to broker: {e}")
 
     def disconnect(self):
-        if self.is_connected:
-            # LWT should handle setting status to offline
-            # self.publish("ha_idrac_controller/status", "offline", retain=True) 
-            self.client.loop_stop()
-            self.client.disconnect()
-            self._log("info", "Gracefully disconnected.")
-            self.is_connected = False
-
+        if not self.is_connected: return
+        self.publish(f"{self.base_topic}/status", "offline", retain=True)
+        self.client.loop_stop()
+        self.client.disconnect()
+        self._log("info", "Gracefully disconnected.")
+        self.is_connected = False
 
     def publish(self, topic, payload, retain=False, qos=0):
-        if self.is_connected:
-            try:
-                # self._log("trace", f"Publishing to {topic}: {payload}")
-                msg_info = self.client.publish(topic, payload, qos=qos, retain=retain)
-                if msg_info.rc != mqtt.MQTT_ERR_SUCCESS:
-                    self._log("warning", f"Failed to enqueue message for topic {topic}. Error code: {msg_info.rc}")
-                return msg_info.is_published()
-            except Exception as e:
-                self._log("error", f"Failed to publish to {topic}: {e}")
-        else:
+        if not self.is_connected:
             self._log("warning", f"Not connected. Cannot publish to {topic}.")
-        return False
+            return
+        try:
+            self.client.publish(topic, payload, qos=qos, retain=retain)
+        except Exception as e:
+            self._log("error", f"Failed to publish to {topic}: {e}")
 
-    def publish_sensor_discovery(self, sensor_type_slug, sensor_name, 
-                                 device_class=None, unit_of_measurement=None, 
-                                 icon=None, value_template=None, 
-                                 entity_category=None, unique_id_suffix=None,
-                                 state_class=None): # <<< ADD state_class=None HERE
+    def publish_sensor_discovery(self, sensor_type_slug, sensor_name, device_class=None, unit_of_measurement=None, icon=None, value_template=None, state_class=None):
         if not self.device_info_dict:
             self._log("warning", f"Device info not set. Cannot publish discovery for {sensor_name}.")
             return
 
-        base_unique_id = f"{self.device_info_dict['identifiers'][0]}_{sensor_type_slug}"
-        if unique_id_suffix: 
-            base_unique_id = f"{base_unique_id}_{unique_id_suffix}"
-
-        # Use a consistent node_id for all sensors of this device to group them under the device in MQTT integration
-        node_id_for_topic = self.device_info_dict['identifiers'][0] 
-        # Sanitize slug further if needed, but usually identifier is okay
-        config_topic_slug_part = f"{sensor_type_slug}{(unique_id_suffix if unique_id_suffix else '')}"
-        
-        config_topic = f"homeassistant/sensor/{node_id_for_topic}/{config_topic_slug_part}/config"
-        state_topic_base = f"ha_idrac_controller/sensor/{node_id_for_topic}" # Base for all sensor states of this device
+        unique_id = f"{self.device_info_dict['identifiers'][0]}_{sensor_type_slug}"
+        config_topic = f"homeassistant/sensor/{self.device_info_dict['identifiers'][0]}/{sensor_type_slug}/config"
         
         payload = {
-            "name": f"{sensor_name}", 
-            "state_topic": f"{state_topic_base}/{config_topic_slug_part}/state",
-            "unique_id": base_unique_id,
+            "name": f"{sensor_name}",
+            "state_topic": f"{self.base_topic}/sensor/{sensor_type_slug}/state",
+            "unique_id": unique_id,
             "device": self.device_info_dict,
-            "availability_topic": "ha_idrac_controller/status",
+            "availability_topic": f"{self.base_topic}/status",
             "payload_available": "online",
             "payload_not_available": "offline"
         }
+
         if device_class: payload["device_class"] = device_class
         if unit_of_measurement: payload["unit_of_measurement"] = unit_of_measurement
         if icon: payload["icon"] = icon
         if value_template: payload["value_template"] = value_template
-        if entity_category: payload["entity_category"] = entity_category
-        if state_class: payload["state_class"] = state_class # <<< ADD THIS LINE TO INCLUDE IT IN PAYLOAD
+        if state_class: payload["state_class"] = state_class
 
         self.publish(config_topic, json.dumps(payload), retain=True)
-        self._log("debug", f"Published discovery for '{sensor_name}' (unique_id: {base_unique_id}) on topic {config_topic}")
+        self._log("debug", f"Published discovery for '{sensor_name}' (unique_id: {unique_id})")
 
-
-
-    def publish_static_sensor_discoveries(self):
-        """Publishes discovery for sensors that are always present or have fixed names."""
-        if not self.is_connected or not self.device_info_dict:
-            self._log("warning", "MQTT not connected or device_info not set, skipping static discoveries.")
-            return
-        
-        self._log("info", "Publishing static sensor discovery messages...")
-        # Inlet Temp
-        self.publish_sensor_discovery(
-            sensor_type_slug="inlet_temp", sensor_name="Inlet Temperature",
-            device_class="temperature", unit_of_measurement="°C",
-            value_template="{{ value_json.temperature | round(1) }}"
-        )
-        # Exhaust Temp
-        self.publish_sensor_discovery(
-            sensor_type_slug="exhaust_temp", sensor_name="Exhaust Temperature",
-            device_class="temperature", unit_of_measurement="°C",
-            value_template="{{ value_json.temperature | round(1) }}"
-        )
-        # Target Fan Speed
-        self.publish_sensor_discovery(
-            sensor_type_slug="target_fan_speed", sensor_name="Target Fan Speed",
-            unit_of_measurement="%", icon="mdi:fan-chevron-up",
-            value_template="{{ value_json.speed if value_json.speed is not none else 'Auto' }}"
-        )
-        # Hottest CPU Temp
-        self.publish_sensor_discovery(
-            sensor_type_slug="hottest_cpu_temp", sensor_name="Hottest CPU Temp",
-            device_class="temperature", unit_of_measurement="°C",
-            value_template="{{ value_json.temperature | round(1) }}"
-        )
-        # Power Consumption (NEW)
-        self.publish_sensor_discovery(
-            sensor_type_slug="power_consumption", sensor_name="Power Consumption",
-            device_class="power", unit_of_measurement="W",
-            state_class="measurement", # For power sensors representing current consumption
-            icon="mdi:flash",
-            value_template="{{ value_json.power | round(0) }}"
-        )
-
-
-    def publish_sensor_state(self, sensor_type_slug, value_dict, unique_id_suffix=None):
+    def publish_sensor_state(self, sensor_type_slug, value_dict):
         if not self.device_info_dict:
-            self._log("warning", "Device info not set. Cannot publish sensor state.")
             return
-
-        state_topic_base = f"ha_idrac_controller/sensor/{self.device_info_dict['identifiers'][0]}"
-        state_topic = f"{state_topic_base}/{sensor_type_slug}{(unique_id_suffix if unique_id_suffix else '')}/state"
+        state_topic = f"{self.base_topic}/sensor/{sensor_type_slug}/state"
         self.publish(state_topic, json.dumps(value_dict))
