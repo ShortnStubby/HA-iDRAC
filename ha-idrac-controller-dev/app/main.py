@@ -57,8 +57,10 @@ class ServerWorker:
             self.server_info.update(model_data)
         
         self.mqtt.configure_broker(
-            self.global_opts["mqtt_host"], self.global_opts["mqtt_port"],
-            self.global_opts["mqtt_username"], self.global_opts["mqtt_password"],
+            self.global_opts["mqtt_host"],
+            self.global_opts["mqtt_port"],
+            self.global_opts["mqtt_username"],
+            self.global_opts["mqtt_password"],
             self.log_level
         )
         self.mqtt.set_device_info(
@@ -68,7 +70,6 @@ class ServerWorker:
             ip_address=self.config.get("idrac_ip")
         )
         self.mqtt.connect()
-        # Give a moment for the connection and LWT to register
         time.sleep(2) 
         return True
 
@@ -77,27 +78,22 @@ class ServerWorker:
             self._log("error", "Initialization failed. Stopping worker.")
             return
 
-        loop_count = 0
         while self.running and running:
             start_time = time.time()
             
-            # --- Data Fetching ---
             raw_temp_data = self.ipmi.retrieve_temperatures_raw()
-            # If the first command fails, we can assume the server is offline
             if raw_temp_data is None:
                 self.mqtt.publish(self.mqtt.availability_topic, "offline", retain=True)
                 self._log("warning", "Failed to retrieve data from iDRAC. Server may be offline. Retrying in 60s.")
                 time.sleep(60)
-                continue # Skip the rest of the loop and retry
+                continue
 
-            # If we succeed, ensure status is online
             self.mqtt.publish(self.mqtt.availability_topic, "online", retain=True)
 
             temps = self.ipmi.parse_temperatures(raw_temp_data, r"Temp", r"Inlet Temp", r"Exhaust Temp")
             fans = self.ipmi.parse_fan_rpms(self.ipmi.retrieve_fan_rpms_raw())
             power = self.ipmi.parse_power_consumption(self.ipmi.retrieve_power_sdr_raw())
 
-            # --- Fan Control Logic ---
             hottest_cpu = max(temps['cpu_temps']) if temps['cpu_temps'] else None
             target_fan_speed = "Dell Auto"
             if hottest_cpu is not None:
@@ -116,7 +112,6 @@ class ServerWorker:
                     target_fan_speed = base_fan
                     self.ipmi.apply_user_fan_control_profile(target_fan_speed)
 
-            # --- Status Update ---
             status_data = {
                 "alias": self.alias, "ip": self.config['idrac_ip'],
                 "cpu_temps_c": temps['cpu_temps'], "hottest_cpu_temp_c": hottest_cpu,
@@ -130,18 +125,14 @@ class ServerWorker:
             
             self._publish_mqtt_data(status_data)
 
-            # --- Sleep ---
             time_taken = time.time() - start_time
             sleep_duration = max(0.1, self.global_opts["check_interval_seconds"] - time_taken)
             self._log("debug", f"Cycle took {time_taken:.2f}s. Sleeping for {sleep_duration:.2f}s.")
             time.sleep(sleep_duration)
-            loop_count += 1
 
         self.cleanup()
 
     def _publish_mqtt_data(self, status):
-        # --- Sensor Discovery ---
-        # Define all possible sensors first
         all_sensors = {
             "connectivity": {"component": "binary_sensor", "name": "Status", "device_class": "connectivity"},
             "hottest_cpu_temp": {"component": "sensor", "name": "Hottest CPU Temp", "device_class": "temperature", "unit": "°C"},
@@ -156,14 +147,11 @@ class ServerWorker:
             slug = f"fan_{re.sub(r'[^a-zA-Z0-9_]+', '', fan['name']).lower()}_rpm"
             all_sensors[slug] = {"component": "sensor", "name": f"{fan['name']} RPM", "unit": "RPM", "icon": "mdi:fan"}
 
-        # Publish discovery for any new sensor
         for slug, desc in all_sensors.items():
             if slug not in self.discovered_sensors:
                 self.mqtt.publish_discovery(desc['component'], slug, desc['name'], desc.get('device_class'), desc.get('unit'), desc.get('icon'), None, desc.get('state_class'))
                 self.discovered_sensors.add(slug)
 
-        # --- State Publishing ---
-        # This now sends a value for every discovered sensor on every loop, preventing "unavailable"
         self.mqtt.publish_sensor_state("hottest_cpu_temp", {"temperature": status['hottest_cpu_temp_c']})
         self.mqtt.publish_sensor_state("inlet_temp", {"temperature": status['inlet_temp_c']})
         self.mqtt.publish_sensor_state("exhaust_temp", {"temperature": status['exhaust_temp_c']})
@@ -190,19 +178,23 @@ class ServerWorker:
 if __name__ == "__main__":
     print("[MAIN] ===== HA iDRAC Multi-Server Controller Starting =====", flush=True)
 
+    # Explicitly get all expected configuration values from the environment
     global_options = {
-        key.lower(): val for key, val in os.environ.items() if key.isupper()
+        "log_level": os.getenv("LOG_LEVEL", "info"),
+        "check_interval_seconds": int(os.getenv("CHECK_INTERVAL_SECONDS", 60)),
+        "master_encryption_key": os.getenv("MASTER_ENCRYPTION_KEY", ""),
+        # MQTT settings
+        "mqtt_host": os.getenv("MQTT_HOST", "core-mosquitto"),
+        "mqtt_port": int(os.getenv("MQTT_PORT", 1883)),
+        "mqtt_username": os.getenv("MQTT_USERNAME", ""),
+        "mqtt_password": os.getenv("MQTT_PASSWORD", ""),
+        # Default fan thresholds
+        "base_fan_speed_percent": int(os.getenv("BASE_FAN_SPEED_PERCENT", 20)),
+        "low_temp_threshold": int(os.getenv("LOW_TEMP_THRESHOLD", 45)),
+        "high_temp_fan_speed_percent": int(os.getenv("HIGH_TEMP_FAN_SPEED_PERCENT", 50)),
+        "critical_temp_threshold": int(os.getenv("CRITICAL_TEMP_THRESHOLD", 65)),
     }
-    # Ensure numeric types are correct
-    for key in ["check_interval_seconds", "mqtt_port", "base_fan_speed_percent", "low_temp_threshold", "high_temp_fan_speed_percent", "critical_temp_threshold"]:
-        if key in global_options:
-            try:
-                global_options[key] = int(global_options[key])
-            except (ValueError, TypeError):
-                # Fallback to a default if the env var is invalid
-                defaults = {"check_interval_seconds": 60, "mqtt_port": 1883, "base_fan_speed_percent": 20, "low_temp_threshold": 45, "high_temp_fan_speed_percent": 50, "critical_temp_threshold": 65}
-                global_options[key] = defaults.get(key)
-    
+
     SERVERS_CONFIG_FILE = "/data/servers_config.json"
     servers_configs_list = []
     if not os.path.exists(SERVERS_CONFIG_FILE):
@@ -213,7 +205,7 @@ if __name__ == "__main__":
             except json.JSONDecodeError: pass
 
     web_server.global_config = global_options
-    web_server_port = int(global_options.get('ingress_port', 8099))
+    web_server_port = int(os.getenv("INGRESS_PORT", 8099))
     web_thread = threading.Thread(target=web_server.run_web_server, args=(web_server_port, STATUS_FILE, status_lock), daemon=True)
     web_thread.start()
 
@@ -229,7 +221,9 @@ if __name__ == "__main__":
     try:
         while running:
             with status_lock:
-                with open(STATUS_FILE, 'w') as f: json.dump(list(ALL_SERVERS_STATUS.values()), f, indent=4)
+                try:
+                    with open(STATUS_FILE, 'w') as f: json.dump(list(ALL_SERVERS_STATUS.values()), f, indent=4)
+                except IOError as e: print(f"[MAIN] ERROR: Could not write to status file {STATUS_FILE}: {e}", flush=True)
             time.sleep(2)
     except KeyboardInterrupt:
         graceful_shutdown(None, None)
