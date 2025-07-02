@@ -105,6 +105,16 @@ def run_web_server(port, status_file_path, lock):
     
     host = '0.0.0.0'
     print(f"[WEBSERVER INFO] Starting Flask web server on {host}:{port}", flush=True)
+
+    # *** NEW DEBUGGING CODE ***
+    # This will print all routes Flask knows about to the add-on log.
+    with app.app_context():
+        rules = []
+        for rule in app.url_map.iter_rules():
+            rules.append(f"Endpoint: {rule.endpoint}, Path: {rule.rule}, Methods: {','.join(rule.methods)}")
+        print("[WEBSERVER INFO] Registered routes:\n" + "\n".join(sorted(rules)), flush=True)
+    # *** END DEBUGGING CODE ***
+
     try:
         app.run(host=host, port=port, debug=False, use_reloader=False)
     except Exception as e:
