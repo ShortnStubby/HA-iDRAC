@@ -1,5 +1,5 @@
 # HA-iDRAC/ha-idrac-controller-dev/app/web_server.py
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, Markup
 import os
 import json
 import logging
@@ -14,7 +14,7 @@ STATUS_FILE = None
 SERVERS_CONFIG_FILE = "/data/servers_config.json"
 status_lock = None
 config_lock = threading.Lock()
-global_config = {} # Will be populated by main.py
+global_config = {} 
 
 # --- Helper functions for config management ---
 def load_servers_config():
@@ -29,7 +29,10 @@ def save_servers_config(servers):
         try:
             with open(SERVERS_CONFIG_FILE, 'w') as f:
                 json.dump(servers, f, indent=4)
-            flash("Configuration saved! Please RESTART the add-on for changes to take effect.", "success")
+            # Use Markup to allow the HTML link in the flashed message
+            restart_url = "/hassio/addon/self/info"
+            message = Markup(f"Configuration saved! <a href='{restart_url}' target='_parent'>Click here to go to the add-on page to RESTART</a> for changes to take effect.")
+            flash(message, "success")
             return True
         except IOError:
             flash("Error: Could not write to config file.", "error")
@@ -60,7 +63,7 @@ def add_server():
     new_alias = request.form.get('alias')
     if any(s['alias'] == new_alias for s in servers):
         flash(f"Server alias '{new_alias}' already exists.", "error")
-        return redirect(url_for('manage_servers'))
+        return redirect('../servers') # Use relative redirect
 
     new_server = {
         "alias": new_alias,
@@ -75,7 +78,7 @@ def add_server():
     }
     servers.append(new_server)
     save_servers_config(servers)
-    return redirect(url_for('manage_servers'))
+    return redirect('../servers') # Use relative redirect
     
 @app.route('/servers/edit/<alias>')
 def edit_server_form(alias):
@@ -84,7 +87,7 @@ def edit_server_form(alias):
     if server_to_edit:
         return render_template('edit_server.html', server=server_to_edit)
     flash(f"Server '{alias}' not found.", "error")
-    return redirect(url_for('manage_servers'))
+    return redirect('../servers') # Use relative redirect
 
 @app.route('/servers/update/<alias>', methods=['POST'])
 def update_server(alias):
@@ -92,7 +95,7 @@ def update_server(alias):
     server_to_update = next((s for s in servers if s['alias'] == alias), None)
     if not server_to_update:
         flash(f"Server '{alias}' not found.", "error")
-        return redirect(url_for('manage_servers'))
+        return redirect('../servers') # Use relative redirect
 
     server_to_update['idrac_ip'] = request.form.get('idrac_ip')
     server_to_update['idrac_username'] = request.form.get('idrac_username')
@@ -106,7 +109,7 @@ def update_server(alias):
     server_to_update['critical_temp_threshold'] = int(request.form.get('critical_temp_threshold'))
     
     save_servers_config(servers)
-    return redirect(url_for('manage_servers'))
+    return redirect('../../servers') # Relative redirect from a deeper path
 
 @app.route('/servers/delete/<alias>', methods=['POST'])
 def delete_server(alias):
@@ -116,7 +119,7 @@ def delete_server(alias):
         save_servers_config(servers_to_keep)
     else:
         flash(f"Server '{alias}' not found.", "error")
-    return redirect(url_for('manage_servers'))
+    return redirect('../servers') # Use relative redirect
 
 def run_web_server(port, status_file_path, lock):
     global STATUS_FILE, status_lock
