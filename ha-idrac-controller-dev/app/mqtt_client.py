@@ -18,7 +18,6 @@ class MqttClient:
         self.availability_topic = f"{self.base_topic}/status"
         self.device_info_dict = None
 
-        # *** MISSING LINES ADDED BACK HERE ***
         self.client.on_connect = self.on_connect
         self.client.on_disconnect = self.on_disconnect
 
@@ -53,8 +52,6 @@ class MqttClient:
         if rc == 0:
             self._log("info", f"Connected successfully to broker {self.broker_address}:{self.port}")
             self.is_connected = True
-            # Publish online status upon successful connection
-            self.publish(self.availability_topic, "online", retain=True)
         else:
             self._log("error", f"Connection failed with code {rc}")
             self.is_connected = False
@@ -67,7 +64,6 @@ class MqttClient:
         if self.is_connected: return
         self._log("info", f"Attempting to connect to broker {self.broker_address}...")
         try:
-            # Set Last Will and Testament
             self.client.will_set(self.availability_topic, payload="offline", qos=1, retain=True)
             self.client.connect(self.broker_address, self.port, 60)
             self.client.loop_start()
@@ -76,7 +72,6 @@ class MqttClient:
 
     def disconnect(self):
         if not self.is_connected: return
-        # Publish offline status before disconnecting gracefully
         self.publish(self.availability_topic, "offline", retain=True)
         self.client.loop_stop()
         self.client.disconnect()
@@ -94,38 +89,41 @@ class MqttClient:
 
     def publish_discovery(self, component, sensor_type_slug, sensor_name, device_class=None, unit_of_measurement=None, icon=None, value_template=None, state_class=None):
         if not self.device_info_dict:
-            self._log("warning", f"Device info not set. Cannot publish discovery for {sensor_name}.")
             return
 
         unique_id = f"{self.device_info_dict['identifiers'][0]}_{sensor_type_slug}"
-        # Correctly format the topic for discovery
-        config_topic = f"homeassistant/{component}/{self.device_info_dict['identifiers'][0]}/{sensor_type_slug}/config"
+        config_topic = f"homeassistant/{component}/{unique_id}/config"
         
         payload = {
             "name": sensor_name,
             "unique_id": unique_id,
             "device": self.device_info_dict,
             "availability_topic": self.availability_topic,
-            "payload_available": "online",
-            "payload_not_available": "offline"
         }
         
         if component == 'sensor':
-             payload["state_topic"] = f"{self.base_topic}/sensor/{sensor_type_slug}/state"
+            payload["state_topic"] = f"{self.base_topic}/sensor/{sensor_type_slug}"
+            payload["json_attributes_topic"] = f"{self.base_topic}/sensor/{sensor_type_slug}"
+            payload["value_template"] = "{{ value_json.state }}"
         elif component == 'binary_sensor':
-             payload["state_topic"] = self.availability_topic # The connectivity sensor uses the main availability topic
+            payload["state_topic"] = self.availability_topic
+            payload["payload_on"] = "online"
+            payload["payload_off"] = "offline"
         
         if device_class: payload["device_class"] = device_class
         if unit_of_measurement: payload["unit_of_measurement"] = unit_of_measurement
         if icon: payload["icon"] = icon
-        if value_template: payload["value_template"] = value_template
         if state_class: payload["state_class"] = state_class
 
         self.publish(config_topic, json.dumps(payload), retain=True)
-        self._log("debug", f"Published discovery for '{sensor_name}' (unique_id: {unique_id})")
 
-    def publish_sensor_state(self, sensor_type_slug, value_dict):
-        if not self.device_info_dict:
+    def publish_state(self, sensor_type_slug, state, attributes=None):
+        if not self.is_connected:
             return
-        state_topic = f"{self.base_topic}/sensor/{sensor_type_slug}/state"
-        self.publish(state_topic, json.dumps(value_dict))
+            
+        topic = f"{self.base_topic}/sensor/{sensor_type_slug}"
+        payload = {"state": state}
+        if attributes:
+            payload.update(attributes)
+            
+        self.publish(topic, json.dumps(payload))

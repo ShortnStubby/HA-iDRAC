@@ -57,10 +57,8 @@ class ServerWorker:
             self.server_info.update(model_data)
         
         self.mqtt.configure_broker(
-            self.global_opts["mqtt_host"],
-            self.global_opts["mqtt_port"],
-            self.global_opts["mqtt_username"],
-            self.global_opts["mqtt_password"],
+            self.global_opts["mqtt_host"], self.global_opts["mqtt_port"],
+            self.global_opts["mqtt_username"], self.global_opts["mqtt_password"],
             self.log_level
         )
         self.mqtt.set_device_info(
@@ -70,8 +68,16 @@ class ServerWorker:
             ip_address=self.config.get("idrac_ip")
         )
         self.mqtt.connect()
-        time.sleep(2) 
-        return True
+
+        # Wait up to 10 seconds for the connection to be established.
+        for _ in range(10):
+            if self.mqtt.is_connected:
+                self._log("info", "MQTT connection confirmed.")
+                return True
+            time.sleep(1)
+
+        self._log("error", "Failed to confirm MQTT connection after 10 seconds.")
+        return False
 
     def run(self):
         if not self._initialize():
@@ -84,12 +90,12 @@ class ServerWorker:
             raw_temp_data = self.ipmi.retrieve_temperatures_raw()
             if raw_temp_data is None:
                 self.mqtt.publish(self.mqtt.availability_topic, "offline", retain=True)
-                self._log("warning", "Failed to retrieve data from iDRAC. Server may be offline. Retrying in 60s.")
+                self._log("warning", "Failed to retrieve data from iDRAC. Server appears to be offline.")
                 time.sleep(60)
                 continue
 
             self.mqtt.publish(self.mqtt.availability_topic, "online", retain=True)
-
+            
             temps = self.ipmi.parse_temperatures(raw_temp_data, r"Temp", r"Inlet Temp", r"Exhaust Temp")
             fans = self.ipmi.parse_fan_rpms(self.ipmi.retrieve_fan_rpms_raw())
             power = self.ipmi.parse_power_consumption(self.ipmi.retrieve_power_sdr_raw())
@@ -104,7 +110,6 @@ class ServerWorker:
 
                 if hottest_cpu >= crit_thresh:
                     self.ipmi.apply_dell_fan_control_profile()
-                    target_fan_speed = "Dell Auto (Critical)"
                 elif hottest_cpu >= low_thresh:
                     target_fan_speed = high_fan
                     self.ipmi.apply_user_fan_control_profile(target_fan_speed)
@@ -113,15 +118,23 @@ class ServerWorker:
                     self.ipmi.apply_user_fan_control_profile(target_fan_speed)
 
             status_data = {
-                "alias": self.alias, "ip": self.config['idrac_ip'],
-                "cpu_temps_c": temps['cpu_temps'], "hottest_cpu_temp_c": hottest_cpu,
-                "inlet_temp_c": temps['inlet_temp'], "exhaust_temp_c": temps['exhaust_temp'],
-                "power_consumption_watts": power, "actual_fan_rpms": fans,
-                "target_fan_speed_percent": target_fan_speed,
-                "last_updated": time.strftime("%Y-%m-%d %H:%M:%S %Z")
+                "hottest_cpu_temp": hottest_cpu, "inlet_temp": temps.get('inlet_temp'),
+                "exhaust_temp": temps.get('exhaust_temp'), "power": power,
+                "target_fan_speed": None if isinstance(target_fan_speed, str) else target_fan_speed,
+                "cpus": temps.get('cpu_temps', []), "fans": fans
             }
+            
             with status_lock:
-                ALL_SERVERS_STATUS[self.alias] = status_data
+                # Add metadata for UI
+                status_data_ui = status_data.copy()
+                status_data_ui.update({
+                    "alias": self.alias, "ip": self.config['idrac_ip'],
+                    "last_updated": time.strftime("%Y-%m-%d %H:%M:%S %Z"),
+                    "power_consumption_watts": power, # for UI display
+                    "actual_fan_rpms": fans, # for UI display
+                    "cpu_temps_c": temps['cpu_temps']
+                })
+                ALL_SERVERS_STATUS[self.alias] = status_data_ui
             
             self._publish_mqtt_data(status_data)
 
@@ -133,36 +146,40 @@ class ServerWorker:
         self.cleanup()
 
     def _publish_mqtt_data(self, status):
-        all_sensors = {
-            "connectivity": {"component": "binary_sensor", "name": "Status", "device_class": "connectivity"},
-            "hottest_cpu_temp": {"component": "sensor", "name": "Hottest CPU Temp", "device_class": "temperature", "unit": "°C"},
-            "inlet_temp": {"component": "sensor", "name": "Inlet Temperature", "device_class": "temperature", "unit": "°C"},
-            "exhaust_temp": {"component": "sensor", "name": "Exhaust Temperature", "device_class": "temperature", "unit": "°C"},
-            "power": {"component": "sensor", "name": "Power Consumption", "device_class": "power", "unit": "W", "state_class": "measurement", "icon": "mdi:flash"},
-            "target_fan_speed": {"component": "sensor", "name": "Target Fan Speed", "unit": "%", "icon": "mdi:fan-chevron-up"},
+        # Define all sensors
+        sensors_to_publish = {
+            "status": {"component": "binary_sensor", "device_class": "connectivity"},
+            "hottest_cpu_temp": {"component": "sensor", "device_class": "temperature", "unit": "°C"},
+            "inlet_temp": {"component": "sensor", "device_class": "temperature", "unit": "°C"},
+            "exhaust_temp": {"component": "sensor", "device_class": "temperature", "unit": "°C"},
+            "power": {"component": "sensor", "device_class": "power", "unit": "W", "state_class": "measurement", "icon": "mdi:flash"},
+            "target_fan_speed": {"component": "sensor", "unit": "%", "icon": "mdi:fan-chevron-up"},
         }
-        for i, temp in enumerate(status.get('cpu_temps_c', [])):
-            all_sensors[f"cpu_{i}_temp"] = {"component": "sensor", "name": f"CPU {i} Temperature", "device_class": "temperature", "unit": "°C"}
-        for fan in status.get('actual_fan_rpms', []):
+        for i, temp in enumerate(status.get('cpus', [])):
+            sensors_to_publish[f"cpu_{i}_temp"] = {"component": "sensor", "name": f"CPU {i} Temperature", "device_class": "temperature", "unit": "°C"}
+        for fan in status.get('fans', []):
             slug = f"fan_{re.sub(r'[^a-zA-Z0-9_]+', '', fan['name']).lower()}_rpm"
-            all_sensors[slug] = {"component": "sensor", "name": f"{fan['name']} RPM", "unit": "RPM", "icon": "mdi:fan"}
+            sensors_to_publish[slug] = {"component": "sensor", "name": f"{fan['name']} RPM", "unit": "RPM", "icon": "mdi:fan"}
 
-        for slug, desc in all_sensors.items():
+        # Publish discovery and state for all
+        for slug, desc in sensors_to_publish.items():
             if slug not in self.discovered_sensors:
-                self.mqtt.publish_discovery(desc['component'], slug, desc['name'], desc.get('device_class'), desc.get('unit'), desc.get('icon'), None, desc.get('state_class'))
+                self.mqtt.publish_discovery(desc['component'], slug, desc.get('name', slug.replace("_", " ").title()), desc.get('device_class'), desc.get('unit'), desc.get('icon'), None, desc.get('state_class'))
                 self.discovered_sensors.add(slug)
+            
+            if desc['component'] == 'sensor':
+                # Simplified state publishing
+                value = status.get(slug)
+                # Handle nested data for fans and cpus
+                if 'fan_' in slug:
+                    fan_name = desc['name'].replace(" RPM", "")
+                    fan_data = next((f for f in status['fans'] if f['name'] == fan_name), None)
+                    value = fan_data['rpm'] if fan_data else None
+                elif 'cpu_' in slug:
+                    cpu_index = int(slug.split('_')[1])
+                    value = status['cpus'][cpu_index] if cpu_index < len(status['cpus']) else None
 
-        self.mqtt.publish_sensor_state("hottest_cpu_temp", {"temperature": status['hottest_cpu_temp_c']})
-        self.mqtt.publish_sensor_state("inlet_temp", {"temperature": status['inlet_temp_c']})
-        self.mqtt.publish_sensor_state("exhaust_temp", {"temperature": status['exhaust_temp_c']})
-        self.mqtt.publish_sensor_state("power", {"power": status['power_consumption_watts']})
-        target_speed_val = status['target_fan_speed_percent']
-        self.mqtt.publish_sensor_state("target_fan_speed", {"speed": None if isinstance(target_speed_val, str) else target_speed_val})
-        for i, temp in enumerate(status.get('cpu_temps_c', [])):
-            self.mqtt.publish_sensor_state(f"cpu_{i}_temp", {"temperature": temp})
-        for fan in status.get('actual_fan_rpms', []):
-            slug = f"fan_{re.sub(r'[^a-zA-Z0-9_]+', '', fan['name']).lower()}_rpm"
-            self.mqtt.publish_sensor_state(slug, {"rpm": fan['rpm']})
+                self.mqtt.publish_state(slug, value)
 
     def cleanup(self):
         self._log("info", "Worker shutting down. Reverting to Dell auto fans.")
@@ -178,17 +195,13 @@ class ServerWorker:
 if __name__ == "__main__":
     print("[MAIN] ===== HA iDRAC Multi-Server Controller Starting =====", flush=True)
 
-    # Explicitly get all expected configuration values from the environment
     global_options = {
         "log_level": os.getenv("LOG_LEVEL", "info"),
         "check_interval_seconds": int(os.getenv("CHECK_INTERVAL_SECONDS", 60)),
-        "master_encryption_key": os.getenv("MASTER_ENCRYPTION_KEY", ""),
-        # MQTT settings
         "mqtt_host": os.getenv("MQTT_HOST", "core-mosquitto"),
         "mqtt_port": int(os.getenv("MQTT_PORT", 1883)),
         "mqtt_username": os.getenv("MQTT_USERNAME", ""),
         "mqtt_password": os.getenv("MQTT_PASSWORD", ""),
-        # Default fan thresholds
         "base_fan_speed_percent": int(os.getenv("BASE_FAN_SPEED_PERCENT", 20)),
         "low_temp_threshold": int(os.getenv("LOW_TEMP_THRESHOLD", 45)),
         "high_temp_fan_speed_percent": int(os.getenv("HIGH_TEMP_FAN_SPEED_PERCENT", 50)),
@@ -221,9 +234,7 @@ if __name__ == "__main__":
     try:
         while running:
             with status_lock:
-                try:
-                    with open(STATUS_FILE, 'w') as f: json.dump(list(ALL_SERVERS_STATUS.values()), f, indent=4)
-                except IOError as e: print(f"[MAIN] ERROR: Could not write to status file {STATUS_FILE}: {e}", flush=True)
+                with open(STATUS_FILE, 'w') as f: json.dump(list(ALL_SERVERS_STATUS.values()), f, indent=4)
             time.sleep(2)
     except KeyboardInterrupt:
         graceful_shutdown(None, None)
