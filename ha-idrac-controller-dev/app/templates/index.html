@@ -9,7 +9,7 @@
 <body>
     <div class="main-container">
         <h1>HA iDRAC Controller Dashboard</h1>
-        <p><a href="{{ url_for('manage_servers') }}">Manage Servers</a></p>
+        <p><a href="servers">Manage Servers</a></p>
         {% if servers %}
             {% for server in servers %}
             <div class="container server-card">
