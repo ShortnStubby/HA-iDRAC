@@ -2,7 +2,7 @@
 
 name: "HA iDRAC Controller BETA"
 version: "0.1.0-dev.1" # Incremented version
-slug: "ha_idrac_controller_Development"
+slug: "ha_idrac_controller_development"
 description: "Control Dell iDRAC fan speeds and monitor server health in Home Assistant. Development Version. Not for production use."
 arch:
   - "aarch64"
