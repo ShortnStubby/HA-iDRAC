@@ -69,7 +69,6 @@ class ServerWorker:
         )
         self.mqtt.connect()
 
-        # Wait up to 10 seconds for the connection to be established.
         for _ in range(10):
             if self.mqtt.is_connected:
                 self._log("info", "MQTT connection confirmed.")
@@ -125,13 +124,12 @@ class ServerWorker:
             }
             
             with status_lock:
-                # Add metadata for UI
                 status_data_ui = status_data.copy()
                 status_data_ui.update({
                     "alias": self.alias, "ip": self.config['idrac_ip'],
                     "last_updated": time.strftime("%Y-%m-%d %H:%M:%S %Z"),
-                    "power_consumption_watts": power, # for UI display
-                    "actual_fan_rpms": fans, # for UI display
+                    "power_consumption_watts": power,
+                    "actual_fan_rpms": fans,
                     "cpu_temps_c": temps['cpu_temps']
                 })
                 ALL_SERVERS_STATUS[self.alias] = status_data_ui
@@ -146,7 +144,6 @@ class ServerWorker:
         self.cleanup()
 
     def _publish_mqtt_data(self, status):
-        # Define all sensors
         sensors_to_publish = {
             "status": {"component": "binary_sensor", "device_class": "connectivity"},
             "hottest_cpu_temp": {"component": "sensor", "device_class": "temperature", "unit": "°C"},
@@ -161,24 +158,29 @@ class ServerWorker:
             slug = f"fan_{re.sub(r'[^a-zA-Z0-9_]+', '', fan['name']).lower()}_rpm"
             sensors_to_publish[slug] = {"component": "sensor", "name": f"{fan['name']} RPM", "unit": "RPM", "icon": "mdi:fan"}
 
-        # Publish discovery and state for all
         for slug, desc in sensors_to_publish.items():
             if slug not in self.discovered_sensors:
                 self.mqtt.publish_discovery(desc['component'], slug, desc.get('name', slug.replace("_", " ").title()), desc.get('device_class'), desc.get('unit'), desc.get('icon'), None, desc.get('state_class'))
                 self.discovered_sensors.add(slug)
             
             if desc['component'] == 'sensor':
-                # Simplified state publishing
-                value = status.get(slug)
-                # Handle nested data for fans and cpus
-                if 'fan_' in slug:
+                value = None # Default value
+                # *** CORRECTED LOGIC BLOCK ***
+                if slug.startswith('fan_'):
                     fan_name = desc['name'].replace(" RPM", "")
                     fan_data = next((f for f in status['fans'] if f['name'] == fan_name), None)
-                    value = fan_data['rpm'] if fan_data else None
-                elif 'cpu_' in slug:
-                    cpu_index = int(slug.split('_')[1])
-                    value = status['cpus'][cpu_index] if cpu_index < len(status['cpus']) else None
-
+                    if fan_data: value = fan_data.get('rpm')
+                elif slug.startswith('cpu_'):
+                    try:
+                        cpu_index = int(slug.split('_')[1])
+                        if cpu_index < len(status['cpus']):
+                            value = status['cpus'][cpu_index]
+                    except (ValueError, IndexError):
+                        pass # Slug is not an indexed CPU, e.g. "hottest_cpu_temp"
+                else:
+                    # All other standard sensors like 'power', 'inlet_temp', etc.
+                    value = status.get(slug)
+                
                 self.mqtt.publish_state(slug, value)
 
     def cleanup(self):
