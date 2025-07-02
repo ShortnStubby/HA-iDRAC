@@ -99,7 +99,6 @@ class IPMIManager:
             "board_product": r"Board Product\s*:\s*(.*)"
         }
         
-        # More reliable parsing
         m_manuf = re.search(patterns["manufacturer"], fru_data, re.IGNORECASE)
         m_model = re.search(patterns["model"], fru_data, re.IGNORECASE)
         
@@ -179,13 +178,21 @@ class IPMIManager:
 
     def parse_power_consumption(self, sdr_data):
         if not sdr_data:
+            self._log("warning", "SDR data is empty for power consumption parsing.")
             return None
         
-        power_line_regex = re.compile(r"^Pwr Consumption.*\|\s*([\d\.]+)\s*Watts", re.IGNORECASE)
-        match = power_line_regex.search(sdr_data)
-        if match:
-            try:
-                return int(float(match.group(1)))
-            except ValueError:
-                return None
+        # This more robust regex looks for a line with "Pwr Consumption" and "Watts"
+        power_line_regex = re.compile(r"^(Pwr Consumption.*?)\s*\|.*?\s*([\d\.]+)\s*Watts", re.IGNORECASE)
+        
+        for line in sdr_data.splitlines():
+            match = power_line_regex.search(line)
+            if match:
+                try:
+                    power_watts = int(float(match.group(2)))
+                    self._log("debug", f"MATCHED POWER: '{match.group(1).strip()}' as {power_watts} Watts")
+                    return power_watts
+                except (ValueError, IndexError):
+                    continue # Try next line if parsing fails
+        
+        self._log("warning", "Power Consumption sensor (Watts) not found in SDR data.")
         return None
