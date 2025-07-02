@@ -101,17 +101,21 @@ class ServerWorker:
                 target_fan_speed = "Dell Auto"
 
                 if hottest_cpu is not None:
-                    low_thresh = self.config['low_temp_threshold']
-                    crit_thresh = self.config['critical_temp_threshold']
+                    # Use server-specific thresholds, fall back to global defaults from addon_config
+                    low_thresh = self.config.get('low_temp_threshold', self.global_opts.get('low_temp_threshold', 45))
+                    crit_thresh = self.config.get('critical_temp_threshold', self.global_opts.get('critical_temp_threshold', 65))
+                    high_fan = self.config.get('high_temp_fan_speed_percent', self.global_opts.get('high_temp_fan_speed_percent', 50))
+                    base_fan = self.config.get('base_fan_speed_percent', self.global_opts.get('base_fan_speed_percent', 20))
+
 
                     if hottest_cpu >= crit_thresh:
                         self.ipmi.apply_dell_fan_control_profile()
                         target_fan_speed = "Dell Auto (Critical)"
                     elif hottest_cpu >= low_thresh:
-                        target_fan_speed = self.config['high_temp_fan_speed_percent']
+                        target_fan_speed = high_fan
                         self.ipmi.apply_user_fan_control_profile(target_fan_speed)
                     else:
-                        target_fan_speed = self.config['base_fan_speed_percent']
+                        target_fan_speed = base_fan
                         self.ipmi.apply_user_fan_control_profile(target_fan_speed)
                 else:
                     self._log("warning", "No CPU temperature available. Reverting to Dell auto control for safety.")
@@ -199,7 +203,7 @@ class ServerWorker:
 if __name__ == "__main__":
     print("[MAIN] ===== HA iDRAC Multi-Server Controller Starting =====", flush=True)
 
-    # Load global HA add-on options
+    # Load global HA add-on options from environment
     global_options = {
         "check_interval_seconds": int(os.getenv("CHECK_INTERVAL_SECONDS", "60")),
         "log_level": os.getenv("LOG_LEVEL", "info").lower(),
@@ -207,22 +211,31 @@ if __name__ == "__main__":
         "mqtt_port": int(os.getenv("MQTT_PORT", "1883")),
         "mqtt_username": os.getenv("MQTT_USERNAME", ""),
         "mqtt_password": os.getenv("MQTT_PASSWORD", ""),
-        "master_encryption_key": os.getenv("MASTER_ENCRYPTION_KEY")
+        "master_encryption_key": os.getenv("MASTER_ENCRYPTION_KEY"),
+        # Also load default fan thresholds from addon config
+        "base_fan_speed_percent": int(os.getenv("BASE_FAN_SPEED_PERCENT", "20")),
+        "low_temp_threshold": int(os.getenv("LOW_TEMP_THRESHOLD", "45")),
+        "high_temp_fan_speed_percent": int(os.getenv("HIGH_TEMP_FAN_SPEED_PERCENT", "50")),
+        "critical_temp_threshold": int(os.getenv("CRITICAL_TEMP_THRESHOLD", "65")),
     }
 
-    # Load servers config
+    # Load servers config, creating it if it doesn't exist
     SERVERS_CONFIG_FILE = "/data/servers_config.json"
     servers_configs_list = []
     if os.path.exists(SERVERS_CONFIG_FILE):
+        print(f"[MAIN] Loading server configurations from {SERVERS_CONFIG_FILE}", flush=True)
         with open(SERVERS_CONFIG_FILE, 'r') as f:
-            servers_configs_list = json.load(f)
+            try:
+                servers_configs_list = json.load(f)
+            except json.JSONDecodeError:
+                print(f"[MAIN] WARNING: Could not decode {SERVERS_CONFIG_FILE}. Starting with an empty server list.", flush=True)
+                servers_configs_list = []
     else:
-        print("[MAIN] FATAL: servers_config.json not found!", flush=True)
-        sys.exit(1)
+        print(f"[MAIN] INFO: {SERVERS_CONFIG_FILE} not found. Creating a new empty config file.", flush=True)
+        with open(SERVERS_CONFIG_FILE, 'w') as f:
+            json.dump([], f) # Create the file with an empty list
+        servers_configs_list = []
 
-    if not servers_configs_list:
-        print("[MAIN] FATAL: No servers defined in servers_config.json.", flush=True)
-        sys.exit(1)
 
     # Start the web server in a background thread
     web_server_port = int(os.getenv("INGRESS_PORT", 8099))
@@ -237,22 +250,23 @@ if __name__ == "__main__":
             print(f"[MAIN] Server '{server_conf_raw.get('alias')}' is disabled, skipping.", flush=True)
             continue
         
-        # Here you would add password decryption using the master_encryption_key
-        # For now, we'll just pass the plaintext password
-        
         worker = ServerWorker(server_conf_raw, global_options)
         worker_instances.append(worker)
         thread = threading.Thread(target=worker.run, daemon=True)
         threads.append(thread)
         thread.start()
         
-    # Keep the main thread alive to catch signals, and update status file
+    # Keep the main thread alive to catch signals and update status file
     try:
         while running:
             with status_lock:
-                with open(STATUS_FILE, 'w') as f:
-                    json.dump(list(ALL_SERVERS_STATUS.values()), f, indent=4)
-            time.sleep(2) # Update status file every 2 seconds
+                # Ensure the status file exists and is writable
+                try:
+                    with open(STATUS_FILE, 'w') as f:
+                        json.dump(list(ALL_SERVERS_STATUS.values()), f, indent=4)
+                except IOError as e:
+                    print(f"[MAIN] ERROR: Could not write to status file {STATUS_FILE}: {e}", flush=True)
+            time.sleep(2)
     except KeyboardInterrupt:
         graceful_shutdown(None, None)
 
@@ -261,6 +275,6 @@ if __name__ == "__main__":
     for worker in worker_instances:
         worker.stop()
     for thread in threads:
-        thread.join(timeout=10) # Wait up to 10 seconds for each thread
+        thread.join(timeout=10)
 
     print("[MAIN] ===== HA iDRAC Controller Stopped =====", flush=True)
