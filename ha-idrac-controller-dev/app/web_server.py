@@ -1,6 +1,6 @@
 # HA-iDRAC/ha-idrac-controller-dev/app/web_server.py
 from flask import Flask, render_template, request, redirect, url_for, flash
-from markupsafe import Markupimport 
+from markupsafe import Markup 
 import os
 import json
 import logging
