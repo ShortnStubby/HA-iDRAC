@@ -32,7 +32,7 @@ def save_servers_config(servers):
                 json.dump(servers, f, indent=4)
             # Use Markup to allow the HTML link in the flashed message
             restart_url = "/hassio/addon/self/info"
-            message = Markup(f"Configuration saved! <a href='{restart_url}' target='_parent'>Click here to go to the add-on page to RESTART</a> for changes to take effect.")
+            message = Markup(f"Configuration saved! <a href='{restart_url}' target='_top'>Click here to go to the add-on page to RESTART</a> for changes to take effect.")
             flash(message, "success")
             return True
         except IOError:
