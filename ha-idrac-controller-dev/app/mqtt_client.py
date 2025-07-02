@@ -18,6 +18,10 @@ class MqttClient:
         self.availability_topic = f"{self.base_topic}/status"
         self.device_info_dict = None
 
+        # *** MISSING LINES ADDED BACK HERE ***
+        self.client.on_connect = self.on_connect
+        self.client.on_disconnect = self.on_disconnect
+
     def _log(self, level, message):
         levels = {"trace": -1, "debug": 0, "info": 1, "warning": 2, "error": 3, "fatal": 4}
         if levels.get(self.log_level, levels["info"]) <= levels.get(level.lower(), levels["info"]):
