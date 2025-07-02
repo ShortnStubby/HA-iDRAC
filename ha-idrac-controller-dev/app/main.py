@@ -116,25 +116,35 @@ class ServerWorker:
                     target_fan_speed = base_fan
                     self.ipmi.apply_user_fan_control_profile(target_fan_speed)
 
-            status_data = {
-                "hottest_cpu_temp": hottest_cpu, "inlet_temp": temps.get('inlet_temp'),
-                "exhaust_temp": temps.get('exhaust_temp'), "power": power,
+            # Prepare data for both MQTT and the Web UI
+            
+            # This data structure is for MQTT publishing
+            mqtt_status_data = {
+                "hottest_cpu_temp": hottest_cpu,
+                "inlet_temp": temps.get('inlet_temp'),
+                "exhaust_temp": temps.get('exhaust_temp'),
+                "power": power,
                 "target_fan_speed": None if isinstance(target_fan_speed, str) else target_fan_speed,
-                "cpus": temps.get('cpu_temps', []), "fans": fans
+                "cpus": temps.get('cpu_temps', []),
+                "fans": fans
             }
             
+            # This data structure is for the Web UI, using the keys the template expects
             with status_lock:
-                status_data_ui = status_data.copy()
-                status_data_ui.update({
-                    "alias": self.alias, "ip": self.config['idrac_ip'],
+                ALL_SERVERS_STATUS[self.alias] = {
+                    "alias": self.alias,
+                    "ip": self.config['idrac_ip'],
                     "last_updated": time.strftime("%Y-%m-%d %H:%M:%S %Z"),
+                    "hottest_cpu_temp_c": hottest_cpu, # Fixed key
+                    "inlet_temp_c": temps.get('inlet_temp'), # Fixed key
+                    "exhaust_temp_c": temps.get('exhaust_temp'), # Fixed key
                     "power_consumption_watts": power,
-                    "actual_fan_rpms": fans,
-                    "cpu_temps_c": temps['cpu_temps']
-                })
-                ALL_SERVERS_STATUS[self.alias] = status_data_ui
+                    "target_fan_speed_percent": target_fan_speed, # Fixed key
+                    "cpu_temps_c": temps.get('cpu_temps', []),
+                    "actual_fan_rpms": fans
+                }
             
-            self._publish_mqtt_data(status_data)
+            self._publish_mqtt_data(mqtt_status_data)
 
             time_taken = time.time() - start_time
             sleep_duration = max(0.1, self.global_opts["check_interval_seconds"] - time_taken)
@@ -164,8 +174,7 @@ class ServerWorker:
                 self.discovered_sensors.add(slug)
             
             if desc['component'] == 'sensor':
-                value = None # Default value
-                # *** CORRECTED LOGIC BLOCK ***
+                value = None 
                 if slug.startswith('fan_'):
                     fan_name = desc['name'].replace(" RPM", "")
                     fan_data = next((f for f in status['fans'] if f['name'] == fan_name), None)
@@ -176,9 +185,8 @@ class ServerWorker:
                         if cpu_index < len(status['cpus']):
                             value = status['cpus'][cpu_index]
                     except (ValueError, IndexError):
-                        pass # Slug is not an indexed CPU, e.g. "hottest_cpu_temp"
+                        pass 
                 else:
-                    # All other standard sensors like 'power', 'inlet_temp', etc.
                     value = status.get(slug)
                 
                 self.mqtt.publish_state(slug, value)
