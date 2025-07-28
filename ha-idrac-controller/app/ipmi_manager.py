@@ -23,7 +23,7 @@ def configure_ipmi(ip, user, password, conn_type="lanplus", log_level="info"):
         _IPMI_BASE_ARGS = ["-I", "open"]
         _log("info", f"IPMI configured for local access via 'open' interface.")
     else: 
-        _IPMI_BASE_ARGS = ["-I", "lanplus", "-H", _IDRAC_IP, "-U", _IDRAC_USER, "-P", _IDRAC_PASSWORD]
+        _IPMI_BASE_ARGS = ["-I", "lanplus", "-H", _IDRAC_IP, "-L", "User", "-U", _IDRAC_USER, "-P", _IDRAC_PASSWORD]
         _log("info", f"IPMI configured for lanplus access to host: {_IDRAC_IP}")
 
 # --- Logging ---
